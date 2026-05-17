@@ -1,100 +1,106 @@
-/* App-specific styles. Tokens + utility classes (.mushy-*) đã lo bởi lib/theme.css. */
+/* org-chart — app-specific styles. Tokens kế thừa từ lib/theme.css (:root). */
+
+.oc-center { min-height: 60vh; display: flex; align-items: center; justify-content: center; }
 
 /* Hero */
-.hero {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  padding: 6px 4px 4px;
+.oc-hero { display: flex; align-items: center; gap: 12px; padding: 4px 2px 10px; }
+.oc-hero-mascot { width: 48px; height: 48px; object-fit: contain; }
+.hero-title { font-size: 22px; font-weight: 700; color: var(--ink); margin: 0; }
+.hero-sub { font-size: 13px; color: var(--muted); margin: 2px 0 0; }
+.oc-refresh { min-width: 44px; padding: 8px 12px; }
+
+/* Allocation banner */
+.oc-banner {
+  border-radius: 16px; padding: 12px 14px; margin: 8px 0 14px;
+  font-size: 13.5px; line-height: 1.45;
 }
-.hero-mascot {
-  width: 56px;
-  height: 56px;
-  object-fit: contain;
-  filter: drop-shadow(0 4px 8px rgba(15, 15, 18, 0.08));
-}
-.hero-title {
-  font-size: 22px;
-  font-weight: 700;
-  margin: 0;
-  color: var(--ink);
-  letter-spacing: 0.2px;
-}
-.hero-sub {
-  margin: 2px 0 0;
-  color: var(--muted);
-  font-size: 13px;
+.oc-banner--over  { background: #FDE8EA; color: #9B1C25; border: 1px solid #F3B5BB; }
+.oc-banner--under { background: #FEF3D8; color: #8A5B00; border: 1px solid #F2D58A; }
+
+.oc-admin-bar { display: flex; gap: 8px; margin-bottom: 14px; flex-wrap: wrap; }
+.oc-admin-bar .mushy-btn { flex: 1; min-width: 130px; }
+
+/* Tree */
+.oc-tree { display: flex; flex-direction: column; gap: 10px; }
+.oc-node { display: flex; flex-direction: column; gap: 10px; }
+.oc-node .oc-node {
+  border-left: 2px dashed var(--hairline);
+  padding-left: 12px; margin-top: 8px;
 }
 
-/* Bridge tests grid */
-.btn-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 10px;
+.oc-squad {
+  background: var(--surface);
+  border: 1px solid var(--hairline);
+  border-radius: 18px;
+  padding: 12px 14px;
+  box-shadow: 0 1px 0 rgba(15, 15, 18, 0.03);
 }
-.btn-tile {
-  /* extend .mushy-btn via class composition trong JSX */
-  flex-direction: column;
-  padding: 14px 12px;
-  min-height: 88px;
-  border-radius: var(--r-tile);
-  font-size: 14px;
+.oc-squad--archived { opacity: 0.6; }
+.oc-squad-head { display: flex; align-items: flex-start; gap: 10px; }
+.oc-collapse {
+  border: none; background: transparent; cursor: pointer;
+  font-size: 15px; color: var(--muted); padding: 0; width: 18px; line-height: 1.5;
 }
-.btn-tile-icon { font-size: 22px; line-height: 1; }
+.oc-squad-title {
+  font-size: 16px; font-weight: 700; color: var(--ink);
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+}
+.oc-intro {
+  font-size: 13px; color: var(--muted); margin: 6px 0 0;
+  line-height: 1.5; white-space: pre-wrap;
+}
+.oc-tag {
+  font-size: 11px; font-weight: 600; color: var(--brand);
+  background: #FFE4E7; border-radius: 999px; padding: 2px 8px;
+}
+.oc-tag--muted { color: var(--muted); background: #FBEEF0; }
 
-/* Logs */
-.log-empty {
-  color: var(--muted);
-  font-size: 13px;
-  text-align: center;
-  padding: 16px 0;
-  margin: 0;
+.oc-mini-btn {
+  border: 1px solid var(--hairline); background: var(--surface);
+  border-radius: 999px; width: 30px; height: 30px; cursor: pointer;
+  color: var(--muted); font-size: 14px; flex-shrink: 0;
 }
-.log-item {
-  display: flex;
-  gap: 10px;
-  padding: 10px 0;
-  border-top: 1px solid var(--hairline);
-}
-.log-item:first-child { border-top: 0; padding-top: 4px; }
-.log-time {
-  font-family: var(--font-mono);
-  font-size: 11px;
-  color: var(--muted);
-  white-space: nowrap;
-  padding-top: 2px;
-}
-.log-body { flex: 1; min-width: 0; }
-.log-label {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-weight: 700;
-  font-size: 13px;
-  margin-bottom: 4px;
-}
-.log-label .dot { width: 6px; height: 6px; border-radius: 50%; }
-.log-label.ok { color: var(--success); }
-.log-label.ok .dot { background: var(--success); }
-.log-label.err { color: var(--danger); }
-.log-label.err .dot { background: var(--danger); }
-.log-data {
-  background: var(--surface-muted);
-  border-radius: 12px;
-  padding: 8px 10px;
-  font-family: var(--font-mono);
-  font-size: 11px;
-  color: var(--text);
-  white-space: pre-wrap;
-  word-break: break-word;
-  margin: 0;
-}
+.oc-mini-btn:disabled { opacity: 0.5; }
 
-/* Footer */
-.footer {
-  margin-top: 24px;
-  text-align: center;
-  font-size: 12px;
-  color: var(--muted);
+/* Members */
+.oc-members { margin-top: 10px; display: flex; flex-direction: column; gap: 8px; }
+.oc-empty-mem { font-size: 12.5px; color: var(--muted); font-style: italic; }
+.oc-mem {
+  display: flex; align-items: center; gap: 10px;
+  background: var(--bg); border-radius: 14px; padding: 8px 10px;
 }
-.footer .heart { color: var(--pink); }
+.oc-avatar {
+  width: 34px; height: 34px; border-radius: 999px; overflow: hidden;
+  background: var(--brand); color: #fff; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 14px; font-weight: 700;
+}
+.oc-avatar img { width: 100%; height: 100%; object-fit: cover; }
+.oc-mem-name {
+  font-size: 14px; font-weight: 600; color: var(--ink);
+  display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+}
+.oc-mem-sub { font-size: 12px; color: var(--muted); margin-top: 1px; }
+.oc-alloc {
+  font-size: 12.5px; font-weight: 700; border-radius: 999px;
+  padding: 3px 9px; flex-shrink: 0;
+}
+.oc-alloc--ok    { background: #E6F7F0; color: #0B7A53; }
+.oc-alloc--over  { background: #FDE8EA; color: #9B1C25; }
+.oc-alloc--under { background: #FEF3D8; color: #8A5B00; }
+
+.oc-footer { text-align: center; color: var(--muted); font-size: 11px; padding: 24px 0 12px; }
+
+/* Modal (modal-scrim / modal-card từ theme.css) */
+.oc-modal { display: flex; flex-direction: column; gap: 8px; max-height: 86vh; overflow-y: auto; }
+.oc-actions { display: flex; flex-direction: column; gap: 8px; margin: 6px 0; }
+.oc-label { font-size: 12.5px; font-weight: 600; color: var(--muted); margin: 8px 0 2px; }
+.oc-textarea { min-height: 88px; resize: vertical; line-height: 1.5; }
+.oc-row-inline { display: flex; gap: 8px; align-items: center; }
+.oc-row-inline .mushy-input { flex: 1; }
+.oc-pos-list { display: flex; flex-direction: column; gap: 6px; margin: 6px 0; }
+.oc-pos-row {
+  display: flex; align-items: center; justify-content: space-between;
+  background: var(--bg); border-radius: 12px; padding: 8px 12px;
+  font-size: 13.5px; color: var(--ink);
+}
