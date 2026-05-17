@@ -1,11 +1,12 @@
 // People lookup cho org-chart — app-specific (đặt trong src/lib/app/ để
 // KHÔNG bị sync-template --delete xoá; shared members.js chỉ select
-// display_name/avatar_url, org-chart cần thêm full_name/job_title/work_phone
-// — mig 020 đã thêm cột + RLS workspace-mate (mig 004) cho đọc cross-user).
+// display_name/avatar_url, org-chart cần thêm full_name/work_phone — mig
+// 020 thêm cột + RLS workspace-mate (mig 004). job_title đã chuyển
+// per-company (mig 021) → KHÔNG đọc từ user_profiles nữa.
 
 import { dbPublic } from '../supabase.js';
 
-// → [{ user_id, ws_role, display_name, full_name, job_title, work_phone, avatar_url }]
+// → [{ user_id, ws_role, display_name, full_name, work_phone, avatar_url }]
 export async function listWorkspacePeople(workspaceId) {
   if (!workspaceId) return [];
   const { data: members, error: mErr } = await dbPublic
@@ -18,7 +19,7 @@ export async function listWorkspacePeople(workspaceId) {
   const ids = members.map((m) => m.user_id);
   const { data: profiles, error: pErr } = await dbPublic
     .from('user_profiles')
-    .select('user_id, display_name, full_name, job_title, work_phone, avatar_url')
+    .select('user_id, display_name, full_name, work_phone, avatar_url')
     .in('user_id', ids);
   if (pErr) throw pErr;
 
@@ -30,7 +31,6 @@ export async function listWorkspacePeople(workspaceId) {
       ws_role: m.role,
       display_name: p.display_name ?? null,
       full_name: p.full_name ?? null,
-      job_title: p.job_title ?? null,
       work_phone: p.work_phone ?? null,
       avatar_url: p.avatar_url ?? null,
     };
