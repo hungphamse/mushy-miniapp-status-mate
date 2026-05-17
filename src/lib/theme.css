@@ -1,0 +1,465 @@
+/* =====================================================================
+ * Mushy design system — default cho mọi mini-app.
+ *
+ * Auto-imported bởi main.jsx → mọi mini-app có:
+ *   1. CSS variables (--brand, --bg, --r-card, --shadow-card, ...)
+ *   2. Base typography + body background
+ *   3. Utility component classes (.mushy-card, .mushy-btn, ...)
+ *
+ * KHÔNG ép buộc — bạn có thể override hoặc dùng class riêng. Nhưng dùng
+ * default này để mini-app trông consistent với superapp shell.
+ * ===================================================================== */
+
+:root {
+  /* === Brand colors === */
+  --brand: #E63946;            /* đỏ cap nấm — primary */
+  --brand-pressed: #C92A39;
+  --brand-soft: #FFE4E7;
+  --pink: #FF6B81;
+  --pink-soft: #FFB3C1;
+
+  /* === Neutrals === */
+  --ink: #0F0F12;              /* heading, đậm nhất */
+  --text: #1A1A1F;
+  --muted: #6B6770;
+  --hairline: rgba(15, 15, 18, 0.08);
+
+  /* === Surfaces === */
+  --bg: #FFF7F8;               /* nền KHÔNG pure white */
+  --surface: #FFFFFF;
+  --surface-muted: #FBEEF0;
+
+  /* === Status === */
+  --success: #10B981;
+  --warn: #F59E0B;
+  --danger: #E63946;
+
+  /* === Radii === */
+  --r-card: 28px;
+  --r-button: 999px;           /* pill */
+  --r-input: 999px;            /* pill */
+  --r-tile: 18px;
+
+  /* === Shadows (clay) === */
+  --shadow-card: 0 8px 24px rgba(15, 15, 18, 0.06), 0 1px 0 rgba(255, 255, 255, 0.9) inset;
+  --shadow-button: 0 6px 16px rgba(201, 42, 57, 0.32);
+
+  /* === Fonts === */
+  --font-body: 'Be Vietnam Pro', system-ui, -apple-system, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  color-scheme: light;
+}
+
+/* === Base === */
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-body);
+  font-size: 15px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  /* Chặn pinch-zoom + double-tap zoom (kết hợp với meta viewport
+     maximum-scale=1.0 trong index.html). Mini-app layout đã optimize
+     mobile + WebView in-shell, zoom làm UI vỡ + iOS tự zoom focus input.
+     touch-action: manipulation = cho phép tap/swipe nhưng disable
+     pinch + double-tap zoom. */
+  touch-action: manipulation;
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+body {
+  background:
+    radial-gradient(circle at 12% -8%, var(--pink-soft) 0, transparent 35%),
+    radial-gradient(circle at 110% 12%, var(--brand-soft) 0, transparent 38%),
+    var(--bg);
+  background-attachment: fixed;
+  min-height: 100dvh;
+}
+
+#root { min-height: 100dvh; }
+
+button { font-family: inherit; }
+input, textarea, select { font-family: inherit; font-size: inherit; }
+
+/* === Layout === */
+.mushy-page {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 20px 18px 80px;
+}
+
+/* === Card (clay) === */
+.mushy-card {
+  background: var(--surface);
+  border-radius: var(--r-card);
+  padding: 18px;
+  box-shadow: var(--shadow-card);
+  border-top: 1px solid rgba(255, 255, 255, 0.9);
+}
+.mushy-card + .mushy-card { margin-top: 14px; }
+
+/* === Section title === */
+.mushy-section-title {
+  font-size: 16px;
+  font-weight: 700;
+  margin: 0 0 10px;
+  color: var(--ink);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.mushy-section-sub {
+  font-size: 13px;
+  color: var(--muted);
+  margin: -6px 0 12px;
+}
+
+/* === Button base === */
+.mushy-btn {
+  appearance: none;
+  border: none;
+  font-family: var(--font-body);
+  font-weight: 700;
+  font-size: 15px;
+  letter-spacing: 0.2px;
+  cursor: pointer;
+  padding: 14px 22px;
+  border-radius: var(--r-button);
+  transition: transform 100ms ease, box-shadow 200ms ease, opacity 200ms ease;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 48px;
+}
+.mushy-btn:active { transform: scale(0.96); }
+.mushy-btn[disabled] { opacity: 0.55; cursor: not-allowed; transform: none; }
+.mushy-btn--block { display: flex; width: 100%; }
+
+.mushy-btn--primary {
+  background: linear-gradient(180deg, #FF5A6A 0%, var(--brand) 100%);
+  color: #fff;
+  box-shadow: var(--shadow-button);
+}
+.mushy-btn--primary:active { box-shadow: 0 2px 6px rgba(201, 42, 57, 0.2); }
+
+.mushy-btn--ghost {
+  background: var(--surface);
+  color: var(--ink);
+  border: 1px solid var(--hairline);
+}
+
+.mushy-btn--dashed {
+  background: transparent;
+  color: var(--brand);
+  border: 1.5px dashed var(--brand);
+}
+
+/* === Input === */
+.mushy-label {
+  display: block;
+  font-weight: 700;
+  font-size: 13px;
+  color: var(--ink);
+  margin: 0 0 6px 14px;
+}
+.mushy-input {
+  width: 100%;
+  background: var(--surface);
+  border: 1.5px solid var(--hairline);
+  border-radius: var(--r-input);
+  padding: 14px 18px;
+  font-family: var(--font-body);
+  font-size: 15px;
+  color: var(--ink);
+  outline: none;
+  transition: border-color 150ms ease;
+}
+.mushy-input::placeholder { color: var(--muted); }
+.mushy-input:focus { border-color: var(--brand); }
+.mushy-input--error { border-color: var(--danger); }
+
+/* textarea: --r-input pill 999 sẽ làm textarea oval. Override radius rounded. */
+textarea.mushy-input,
+textarea.mushy-input:focus {
+  border-radius: 16px;
+  padding: 12px 14px;
+  line-height: 1.5;
+  min-height: 120px;
+  resize: vertical;
+}
+
+/* === Status pill === */
+.mushy-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: var(--r-button);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.2px;
+}
+.mushy-status-dot { width: 6px; height: 6px; border-radius: 50%; }
+.mushy-status--ok { background: rgba(16, 185, 129, 0.12); color: #047857; }
+.mushy-status--ok .mushy-status-dot { background: var(--success); }
+.mushy-status--warn { background: rgba(245, 158, 11, 0.14); color: #92400E; }
+.mushy-status--warn .mushy-status-dot { background: var(--warn); }
+.mushy-status--err { background: rgba(230, 57, 70, 0.12); color: var(--danger); }
+.mushy-status--err .mushy-status-dot { background: var(--danger); }
+
+/* === Code block === */
+.mushy-code {
+  background: #0E1116;
+  color: #e6edf3;
+  border-radius: 16px;
+  padding: 14px 16px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.55;
+  overflow-x: auto;
+  white-space: pre;
+  margin: 0;
+  border: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+/* === Animations === */
+@keyframes mushy-spin { to { transform: rotate(360deg); } }
+.mushy-spinner {
+  width: 16px;
+  height: 16px;
+  border: 2px solid currentColor;
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: mushy-spin 0.6s linear infinite;
+  display: inline-block;
+}
+
+/* === Custom Select (src/components/Select.jsx — thay native <select>) === */
+.mushy-select {
+  position: relative;
+  width: 100%;
+}
+.mushy-select-trigger {
+  width: 100%;
+  background: var(--surface);
+  border: 1.5px solid var(--hairline);
+  border-radius: 16px;
+  padding: 12px 14px;
+  font-family: var(--font-body);
+  font-size: 14px;
+  color: var(--ink);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  cursor: pointer;
+  text-align: left;
+  transition: border-color 150ms ease;
+}
+.mushy-select-trigger:hover:not(:disabled) { border-color: var(--brand); }
+.mushy-select-trigger--open { border-color: var(--brand); }
+.mushy-select-trigger:disabled { opacity: 0.5; cursor: not-allowed; }
+.mushy-select-value {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.mushy-select-placeholder { color: var(--muted); }
+.mushy-select-icon { font-size: 16px; flex-shrink: 0; }
+.mushy-select-chevron {
+  color: var(--muted);
+  transition: transform 200ms ease;
+  font-size: 14px;
+}
+.mushy-select-chevron--open { transform: rotate(180deg); color: var(--brand); }
+
+.mushy-select-panel {
+  position: absolute;
+  left: 0;
+  right: 0;
+  background: var(--surface);
+  border: 1.5px solid var(--hairline);
+  border-radius: 16px;
+  box-shadow: var(--shadow-card);
+  list-style: none;
+  margin: 0;
+  padding: 6px;
+  max-height: 320px;
+  overflow-y: auto;
+  z-index: 100;
+}
+.mushy-select-panel--down {
+  top: calc(100% + 6px);
+  bottom: auto;
+  transform-origin: top center;
+  animation: select-pop-down 140ms cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+.mushy-select-panel--up {
+  top: auto;
+  bottom: calc(100% + 6px);
+  transform-origin: bottom center;
+  animation: select-pop-up 140ms cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+@keyframes select-pop-down {
+  from { opacity: 0; transform: translateY(-4px) scale(0.98); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+@keyframes select-pop-up {
+  from { opacity: 0; transform: translateY(4px) scale(0.98); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+.mushy-select-option {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  font-size: 14px;
+  color: var(--ink);
+  cursor: pointer;
+  user-select: none;
+  transition: background 100ms ease;
+}
+.mushy-select-option--highlight {
+  background: var(--surface-muted);
+}
+.mushy-select-option--selected {
+  background: color-mix(in srgb, var(--brand) 10%, transparent);
+  color: var(--brand);
+  font-weight: 600;
+}
+.mushy-select-label {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mushy-select-check {
+  color: var(--brand);
+  font-weight: 700;
+  font-size: 14px;
+}
+.mushy-select-empty {
+  padding: 10px 12px;
+  color: var(--muted);
+  font-size: 13px;
+  font-style: italic;
+}
+
+/* === Modal + Dialog (dùng với src/components/Dialog.jsx — DialogProvider) === */
+.modal-scrim {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 15, 18, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 16px;
+}
+.modal-card {
+  background: var(--surface);
+  border-radius: var(--r-card);
+  padding: 24px;
+  max-width: 420px;
+  width: 100%;
+  max-height: 90vh;
+  overflow-y: auto;
+  box-shadow: var(--shadow-card);
+  border-top: 1px solid rgba(255, 255, 255, 0.9);
+}
+.dialog-scrim { animation: dialog-fade 160ms ease-out; }
+.dialog-card {
+  max-width: 380px;
+  text-align: center;
+  animation: dialog-pop 200ms cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+.dialog-icon {
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  margin: 0 auto 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 28px;
+  font-weight: 700;
+  line-height: 1;
+}
+.dialog-title {
+  margin: 0;
+  font-size: 19px;
+  font-weight: 700;
+  color: var(--ink);
+}
+.dialog-body {
+  margin: 8px 0 0;
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--muted);
+  white-space: pre-wrap;
+}
+/* Rich body (React node): left-align, list/code/inline styles fit theme */
+.dialog-body--rich {
+  text-align: left;
+  white-space: normal;
+  font-size: 13.5px;
+  color: var(--ink);
+}
+.dialog-body--rich p { margin: 0 0 8px; }
+.dialog-body--rich p:last-child { margin-bottom: 0; }
+.dialog-body--rich ol,
+.dialog-body--rich ul {
+  margin: 4px 0 8px;
+  padding-left: 22px;
+}
+.dialog-body--rich li {
+  margin: 2px 0;
+  line-height: 1.5;
+}
+.dialog-body--rich code {
+  background: var(--surface-muted);
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 12px;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  color: var(--ink);
+}
+.dialog-body--rich strong { color: var(--ink); font-weight: 600; }
+.dialog-body--rich .dialog-warn { color: var(--danger); font-weight: 600; }
+.form-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 16px;
+}
+.dialog-card .form-actions { margin-top: 20px; }
+
+/* Danger button variant — đỏ filled, dùng cho confirm xoá/destructive */
+.mushy-btn--danger {
+  background: var(--danger);
+  color: #fff;
+  box-shadow: 0 6px 16px rgba(230, 57, 70, 0.28);
+}
+.mushy-btn--danger:hover { background: var(--brand-pressed); }
+.mushy-btn--danger:active { transform: translateY(1px); }
+
+@keyframes dialog-fade {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+@keyframes dialog-pop {
+  from { opacity: 0; transform: scale(0.92); }
+  to   { opacity: 1; transform: scale(1); }
+}

@@ -1,0 +1,10 @@
+{
+  "_comment": "BƯỚC ĐẦU TIÊN khi clone template: thay 'slug' bên dưới bằng slug đăng ký với Mushy admin (vd 'expense', 'lunch-plan'). 3-41 ký tự [a-z0-9_-]. Schema name = 'app_{slug}' với dash → underscore (slug 'lunch-plan' → schema 'app_lunch_plan').",
+
+  "slug": "org-chart",
+
+  "supabase": {
+    "url": "https://dftgyqxhegjamllsblsw.supabase.co",
+    "anonKey": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRmdGd5cXhoZWdqYW1sbHNibHN3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzgzNzU4OTAsImV4cCI6MjA5Mzk1MTg5MH0.RL7lGEjxKyy_5dQ792BcKzi3FnD6w1JlI1804_7B00U"
+  }
+}

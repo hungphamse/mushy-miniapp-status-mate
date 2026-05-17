@@ -1,0 +1,13 @@
+node_modules
+dist
+.vercel
+.DS_Store
+
+# Env — KHÔNG commit
+.env
+.env.local
+.env.*.local
+
+# Logs
+*.log
+npm-debug.log*
