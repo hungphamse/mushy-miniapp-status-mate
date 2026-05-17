@@ -675,19 +675,26 @@ function PositionsManager({ ctx, data, reload, close, dialog }) {
   );
 }
 
-// Sub-3 — activity feed (movement = logs). Collapsible, default mở gọn.
+// Sub-3 — activity feed (movement = logs). squad_events vẫn LƯU đủ mọi
+// loại; đây CHỈ lọc hiển thị 3 hành động: trở thành lead / gia nhập / rời.
+const FEED_SHOW = (ev) =>
+  (ev.type === 'lead_changed' && ev.subject_id) // ai đó trở thành squad lead
+  || ev.type === 'member_joined'                // ai đó gia nhập squad
+  || ev.type === 'member_left';                 // ai đó rời squad
+
 function ActivityFeed({ events, peopleMap, squads }) {
   const [open, setOpen] = useState(false);
   const nameOf = (uid) => personLabel(peopleMap[uid]);
   const sqName = (sid) => squads.find((s) => s.id === sid)?.name;
-  const list = open ? events : events.slice(0, 5);
+  const shown = events.filter(FEED_SHOW);
+  const list = open ? shown : shown.slice(0, 5);
   return (
     <div className="oc-feed">
       <button className="oc-feed-head" onClick={() => setOpen((o) => !o)}>
-        <span>🕑 Hoạt động gần đây ({events.length})</span>
+        <span>🕑 Hoạt động gần đây ({shown.length})</span>
         <span>{open ? '▾' : '▸'}</span>
       </button>
-      {events.length === 0 ? (
+      {shown.length === 0 ? (
         <div className="oc-feed-empty">Chưa có hoạt động nào.</div>
       ) : (
         <div className="oc-feed-list">
@@ -698,9 +705,9 @@ function ActivityFeed({ events, peopleMap, squads }) {
               <span className="oc-feed-time">{timeAgo(ev.created_at)}</span>
             </div>
           ))}
-          {!open && events.length > 5 && (
+          {!open && shown.length > 5 && (
             <button className="oc-link-btn" onClick={() => setOpen(true)}>
-              Xem tất cả ({events.length})
+              Xem tất cả ({shown.length})
             </button>
           )}
         </div>
