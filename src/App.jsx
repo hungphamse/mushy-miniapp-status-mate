@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { getContext } from './lib/context.js';
+import { bridge } from './lib/bridge.js';
 import { useDialog } from './components/Dialog.jsx';
 import Select from './components/Select.jsx';
 import { listWorkspacePeople, personLabel } from './lib/app/people.js';
@@ -15,7 +16,7 @@ export default function App() {
   const [ctx, setCtx] = useState(null);
   const [ctxErr, setCtxErr] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [data, setData] = useState({ squads: [], members: [], positions: [] });
+  const [data, setData] = useState({ squads: [], members: [], positions: [], requests: [] });
   const [people, setPeople] = useState([]);
   const [modal, setModal] = useState(null); // { kind, ... }
 
@@ -66,6 +67,20 @@ export default function App() {
     for (const r of data.members) (m[r.squad_id] = m[r.squad_id] || []).push(r);
     return m;
   }, [data.members]);
+
+  // Sub-2: pending requests theo squad + của riêng tôi
+  const requestsBySquad = useMemo(() => {
+    const m = {};
+    for (const r of (data.requests || [])) (m[r.squad_id] = m[r.squad_id] || []).push(r);
+    return m;
+  }, [data.requests]);
+  const myPending = useMemo(() => {
+    const m = {};
+    for (const r of (data.requests || [])) {
+      if (ctx && r.user_id === ctx.userId) m[r.squad_id] = r;
+    }
+    return m;
+  }, [data.requests, ctx]);
 
   const myTotal = ctx ? (totals[ctx.userId] || 0) : 0;
   const myInAny = ctx && data.members.some((r) => r.user_id === ctx.userId);
@@ -143,7 +158,9 @@ export default function App() {
               key={s.id} squad={s} depth={0}
               childrenOf={childrenOf} membersOf={membersOf}
               peopleMap={peopleMap} totals={totals}
+              requestsBySquad={requestsBySquad} myPending={myPending}
               ctx={ctx} isAdmin={isAdmin} setModal={setModal}
+              reload={reload} dialog={dialog}
             />
           ))}
         </div>
@@ -164,8 +181,10 @@ export default function App() {
 }
 
 // ---------------- Squad node (đệ quy, collapsible) ----------------
-function SquadNode({ squad, depth, childrenOf, membersOf, peopleMap, totals, ctx, isAdmin, setModal }) {
+function SquadNode({ squad, depth, childrenOf, membersOf, peopleMap, totals,
+  requestsBySquad, myPending, ctx, isAdmin, setModal, reload, dialog }) {
   const [open, setOpen] = useState(depth < 2);
+  const [busy, setBusy] = useState(false);
   const kids = childrenOf[squad.id] || [];
   const mem = (membersOf[squad.id] || []).slice().sort((a, b) => {
     if (a.kind !== b.kind) return a.kind === 'lead' ? -1 : 1;
@@ -173,6 +192,29 @@ function SquadNode({ squad, depth, childrenOf, membersOf, peopleMap, totals, ctx
   });
   const archived = squad.status === 'archived';
   const isLead = squad.lead_user_id === ctx.userId;
+  const canManage = isAdmin || isLead;
+  const myActive = mem.some((r) => r.user_id === ctx.userId);
+  const myReq = myPending[squad.id];                       // pending của tôi (nếu có)
+  const pend = requestsBySquad[squad.id] || [];            // mọi pending của squad
+
+  // Chạy RPC + reload, báo lỗi qua dialog. Không đóng gì (inline).
+  const act = async (fn) => {
+    if (busy) return;
+    setBusy(true);
+    try { await fn(); await reload(); }
+    catch (e) { dialog.error('Không thực hiện được', e?.message || String(e)); }
+    finally { setBusy(false); }
+  };
+
+  async function reqLeave() {
+    const ok = await dialog.confirm('Xin rời squad?',
+      `Gửi yêu cầu rời “${squad.name}”. Squad lead / admin sẽ duyệt.`);
+    if (ok) act(() => api.requestMembership(squad.id, 'leave'));
+  }
+  async function cancelReq() {
+    const ok = await dialog.confirm('Huỷ yêu cầu?', 'Yêu cầu đang chờ sẽ bị huỷ.');
+    if (ok) act(() => api.cancelMyRequest(myReq.id));
+  }
 
   return (
     <div className="oc-node" style={{ marginLeft: depth ? 14 : 0 }}>
@@ -211,7 +253,10 @@ function SquadNode({ squad, depth, childrenOf, membersOf, peopleMap, totals, ctx
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div className="oc-mem-name">
                       {r.kind === 'lead' && <span title="Squad lead">👑 </span>}
-                      {personLabel(p)}
+                      <button className="oc-name-btn"
+                        onClick={() => setModal({ kind: 'person', person: p || { user_id: r.user_id } })}>
+                        {personLabel(p)}
+                      </button>
                       {mine && <span className="oc-tag">bạn</span>}
                     </div>
                     <div className="oc-mem-sub">
@@ -230,13 +275,70 @@ function SquadNode({ squad, depth, childrenOf, membersOf, peopleMap, totals, ctx
             })}
           </div>
         )}
+
+        {open && !archived && (
+          <div className="oc-self">
+            {myReq ? (
+              <div className="oc-req-mine">
+                <span className="oc-tag oc-tag--muted">
+                  ⏳ Đang chờ duyệt: {myReq.type === 'join' ? 'xin vào' : 'xin rời'}
+                </span>
+                <button className="oc-mini-btn" disabled={busy} onClick={cancelReq}>Huỷ</button>
+              </div>
+            ) : myActive ? (
+              <button className="oc-link-btn" disabled={busy} onClick={reqLeave}>
+                Xin rời squad →
+              </button>
+            ) : (
+              <button className="oc-link-btn" disabled={busy}
+                onClick={() => setModal({ kind: 'request-join', squad })}>
+                + Xin vào squad
+              </button>
+            )}
+          </div>
+        )}
+
+        {open && canManage && pend.length > 0 && (
+          <div className="oc-pending">
+            <div className="oc-pending-title">Yêu cầu chờ duyệt ({pend.length})</div>
+            {pend.map((r) => {
+              const rp = peopleMap[r.user_id];
+              return (
+                <div key={r.id} className="oc-req">
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div className="oc-mem-name">
+                      {personLabel(rp)}
+                      <span className={`oc-tag ${r.type === 'leave' ? 'oc-tag--muted' : ''}`}>
+                        {r.type === 'join' ? 'xin vào' : 'xin rời'}
+                      </span>
+                    </div>
+                    <div className="oc-mem-sub">
+                      {r.type === 'join'
+                        ? `${r.req_position || '—'} · ${r.req_allocation ?? 0}%`
+                        : 'Rời squad'}
+                      {r.message ? ` · “${r.message}”` : ''}
+                    </div>
+                  </div>
+                  <button className="oc-mini-btn oc-ok" disabled={busy}
+                    title="Duyệt"
+                    onClick={() => act(() => api.decideMembership(r.id, true))}>✓</button>
+                  <button className="oc-mini-btn" disabled={busy}
+                    title="Từ chối"
+                    onClick={() => act(() => api.decideMembership(r.id, false))}>✕</button>
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
 
       {open && kids.map((k) => (
         <SquadNode key={k.id} squad={k} depth={depth + 1}
           childrenOf={childrenOf} membersOf={membersOf}
           peopleMap={peopleMap} totals={totals}
-          ctx={ctx} isAdmin={isAdmin} setModal={setModal} />
+          requestsBySquad={requestsBySquad} myPending={myPending}
+          ctx={ctx} isAdmin={isAdmin} setModal={setModal}
+          reload={reload} dialog={dialog} />
       ))}
     </div>
   );
@@ -317,6 +419,13 @@ function ModalHost({ modal, setModal, close, ctx, data, people, positionOptions,
   }
   if (modal.kind === 'positions') {
     return <PositionsManager ctx={ctx} data={data} reload={reload} close={close} dialog={dialog} />;
+  }
+  if (modal.kind === 'request-join') {
+    return <RequestJoin squad={modal.squad} positionOptions={positionOptions}
+      run={run} close={close} />;
+  }
+  if (modal.kind === 'person') {
+    return <PersonActions person={modal.person} close={close} dialog={dialog} />;
   }
   return null;
 }
@@ -533,6 +642,72 @@ function PositionsManager({ ctx, data, reload, close, dialog }) {
           </div>
         </>
       )}
+      <button className="mushy-btn mushy-btn--ghost mushy-btn--block" onClick={close}>Đóng</button>
+    </Scrim>
+  );
+}
+
+// Sub-2 — member tự xin vào squad (cho chính mình)
+function RequestJoin({ squad, positionOptions, run, close }) {
+  const [posSel, setPosSel] = useState('');
+  const [posOther, setPosOther] = useState('');
+  const [alloc, setAlloc] = useState('');
+  const [msg, setMsg] = useState('');
+  const pos = posSel === OTHER ? posOther.trim() : posSel;
+  const allocN = Math.max(0, Math.min(100, parseInt(alloc || '0', 10) || 0));
+  return (
+    <Scrim close={close}>
+      <h3 className="dialog-title">Xin vào · {squad.name}</h3>
+      <p className="mushy-section-sub">Squad lead / admin sẽ duyệt yêu cầu.</p>
+      <label className="oc-label">Vai trò bạn muốn</label>
+      <Select value={posSel} onChange={setPosSel} options={positionOptions} placeholder="— Chọn vai trò —" />
+      {posSel === OTHER && (
+        <input className="mushy-input" value={posOther} maxLength={40}
+          onChange={(e) => setPosOther(e.target.value)} placeholder="Nhập vai trò khác…" />
+      )}
+      <label className="oc-label">% Allocation (0–100)</label>
+      <input className="mushy-input" type="number" inputMode="numeric" min={0} max={100}
+        value={alloc} onChange={(e) => setAlloc(e.target.value)} placeholder="VD: 50" />
+      <label className="oc-label">Lời nhắn (tuỳ chọn)</label>
+      <textarea className="mushy-input oc-textarea" value={msg} maxLength={500}
+        onChange={(e) => setMsg(e.target.value)} placeholder="Vì sao bạn muốn vào squad này…" />
+      <button className="mushy-btn mushy-btn--primary mushy-btn--block" disabled={!pos}
+        onClick={() => run(
+          () => api.requestMembership(squad.id, 'join', pos, allocN, msg.trim() || null),
+          'Đã gửi yêu cầu xin vào — chờ duyệt.')}>
+        Gửi yêu cầu
+      </button>
+      <button className="mushy-btn mushy-btn--ghost mushy-btn--block" onClick={close}>Huỷ</button>
+    </Scrim>
+  );
+}
+
+// Ấn vào tên người → hành động liên hệ. Hiện: gọi điện (SĐT công việc đã
+// lưu). Tương lai: email, chat duhat… (đang để disabled "sắp có").
+function PersonActions({ person, close, dialog }) {
+  const phone = person?.work_phone && person.work_phone.trim();
+  return (
+    <Scrim close={close}>
+      <h3 className="dialog-title">{personLabel(person)}</h3>
+      {person?.job_title && <p className="mushy-section-sub">{person.job_title}</p>}
+
+      <button className="mushy-btn mushy-btn--primary mushy-btn--block"
+        disabled={!phone}
+        onClick={() => {
+          if (!phone) return;
+          try { bridge.tel(phone); } catch (e) { dialog.error('Không gọi được', e?.message || String(e)); }
+          close();
+        }}>
+        📞 {phone ? `Gọi ${phone}` : 'Chưa có số điện thoại'}
+      </button>
+
+      <button className="mushy-btn mushy-btn--ghost mushy-btn--block" disabled>
+        ✉️ Email · sắp có
+      </button>
+      <button className="mushy-btn mushy-btn--ghost mushy-btn--block" disabled>
+        💬 Chat (duhat) · sắp có
+      </button>
+
       <button className="mushy-btn mushy-btn--ghost mushy-btn--block" onClick={close}>Đóng</button>
     </Scrim>
   );

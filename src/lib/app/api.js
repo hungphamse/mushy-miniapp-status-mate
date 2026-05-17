@@ -5,10 +5,12 @@
 import { db } from '../supabase.js';
 
 export async function fetchOrgChart(ws) {
-  const [squadsR, membersR, positionsR] = await Promise.all([
+  const [squadsR, membersR, positionsR, reqR] = await Promise.all([
     db.from('squads').select('*').eq('workspace_id', ws),
     db.from('squad_members').select('*').eq('workspace_id', ws).is('left_at', null),
     db.from('positions').select('*').eq('workspace_id', ws).order('sort_order', { ascending: true }),
+    // Sub-2: pending requests. Resilient nếu mig 002 chưa apply.
+    db.from('membership_requests').select('*').eq('workspace_id', ws).eq('status', 'pending'),
   ]);
   if (squadsR.error) throw squadsR.error;
   if (membersR.error) throw membersR.error;
@@ -17,6 +19,7 @@ export async function fetchOrgChart(ws) {
     squads: squadsR.data || [],
     members: membersR.data || [],
     positions: positionsR.data || [],
+    requests: reqR.error ? [] : (reqR.data || []),
   };
 }
 
@@ -47,6 +50,17 @@ export const api = {
   removeMember: (p_squad, p_user) => call('remove_member', { p_squad, p_user }),
   setMyAllocation: (p_squad, p_allocation, p_position) =>
     call('set_my_allocation', { p_squad, p_allocation, p_position }),
+  // Sub-2 — member tự xin vào/rời, lead duyệt
+  requestMembership: (p_squad, p_type, p_position, p_allocation, p_message) =>
+    call('request_membership', {
+      p_squad, p_type,
+      p_position: p_position || null,
+      p_allocation: p_allocation == null ? null : p_allocation,
+      p_message: p_message || null,
+    }),
+  decideMembership: (p_req, p_approve) =>
+    call('decide_membership', { p_req, p_approve }),
+  cancelMyRequest: (p_req) => call('cancel_my_request', { p_req }),
 };
 
 // slug từ tên: bỏ dấu, lowercase, gạch nối. Min 2 ký tự (regex squad.slug).
