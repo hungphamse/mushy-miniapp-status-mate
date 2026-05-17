@@ -5,12 +5,15 @@
 import { db } from '../supabase.js';
 
 export async function fetchOrgChart(ws) {
-  const [squadsR, membersR, positionsR, reqR] = await Promise.all([
+  const [squadsR, membersR, positionsR, reqR, evR] = await Promise.all([
     db.from('squads').select('*').eq('workspace_id', ws),
     db.from('squad_members').select('*').eq('workspace_id', ws).is('left_at', null),
     db.from('positions').select('*').eq('workspace_id', ws).order('sort_order', { ascending: true }),
     // Sub-2: pending requests. Resilient nếu mig 002 chưa apply.
     db.from('membership_requests').select('*').eq('workspace_id', ws).eq('status', 'pending'),
+    // Sub-3: activity feed. Resilient nếu mig 003 chưa apply.
+    db.from('squad_events').select('*').eq('workspace_id', ws)
+      .order('created_at', { ascending: false }).limit(40),
   ]);
   if (squadsR.error) throw squadsR.error;
   if (membersR.error) throw membersR.error;
@@ -20,6 +23,7 @@ export async function fetchOrgChart(ws) {
     members: membersR.data || [],
     positions: positionsR.data || [],
     requests: reqR.error ? [] : (reqR.data || []),
+    events: evR.error ? [] : (evR.data || []),
   };
 }
 
@@ -86,4 +90,44 @@ export function allocStatus(total) {
   if (total > 100) return 'over';
   if (total < 100) return 'under';
   return 'ok';
+}
+
+// squad_events → 1 dòng tiếng Việt. nameOf(uid)→tên, squadName(id)→tên squad.
+export function describeEvent(ev, nameOf, squadName) {
+  const who = ev.subject_id ? nameOf(ev.subject_id) : '';
+  const actor = ev.actor_id ? nameOf(ev.actor_id) : 'Ai đó';
+  const sq = squadName(ev.squad_id) || 'squad';
+  const p = ev.payload || {};
+  switch (ev.type) {
+    case 'squad_created':   return `${actor} tạo squad “${p.name || sq}”`;
+    case 'squad_renamed':   return `${actor} đổi tên squad thành “${p.name || sq}”`;
+    case 'squad_archived':  return `${actor} lưu trữ squad “${sq}”`;
+    case 'squad_restored':  return `${actor} khôi phục squad “${sq}”`;
+    case 'intro_updated':   return `${actor} cập nhật giới thiệu “${sq}”`;
+    case 'lead_changed':
+    case 'lead_assigned':   return `${who || 'Ai đó'} được gán làm lead “${sq}”`;
+    case 'member_joined':   return `${who} vào squad “${sq}” (${p.position || '—'} · ${p.allocation ?? 0}%)`;
+    case 'member_left':     return `${who} rời squad “${sq}”`;
+    case 'role_changed':    return `${who} đổi vai trò ${p.from}→${p.to} ở “${sq}”`;
+    case 'allocation_changed':
+      return `${who} chỉnh allocation “${sq}” → ${p.allocation ?? 0}% (${p.position || '—'})`;
+    case 'request_created':
+      return `${who} xin ${p.req_type === 'leave' ? 'rời' : 'vào'} “${sq}”`;
+    case 'request_approved':
+      return `${actor} duyệt yêu cầu ${p.req_type === 'leave' ? 'rời' : 'vào'} “${sq}” của ${who}`;
+    case 'request_rejected':
+      return `${actor} từ chối yêu cầu của ${who} ở “${sq}”`;
+    case 'request_cancelled':
+      return `${who} huỷ yêu cầu ở “${sq}”`;
+    default: return `${actor}: ${ev.type} · ${sq}`;
+  }
+}
+
+// 'x phút/giờ/ngày trước' gọn.
+export function timeAgo(iso) {
+  const s = Math.max(0, (Date.now() - new Date(iso).getTime()) / 1000);
+  if (s < 60) return 'vừa xong';
+  if (s < 3600) return `${Math.floor(s / 60)} phút trước`;
+  if (s < 86400) return `${Math.floor(s / 3600)} giờ trước`;
+  return `${Math.floor(s / 86400)} ngày trước`;
 }

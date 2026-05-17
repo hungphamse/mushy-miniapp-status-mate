@@ -1,11 +1,13 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { getContext } from './lib/context.js';
 import { bridge } from './lib/bridge.js';
+import { subscribeToTable } from './lib/realtime.js';
 import { useDialog } from './components/Dialog.jsx';
 import Select from './components/Select.jsx';
 import { listWorkspacePeople, personLabel } from './lib/app/people.js';
 import {
   fetchOrgChart, api, slugify, allocationTotals, allocStatus,
+  describeEvent, timeAgo,
 } from './lib/app/api.js';
 import './App.css';
 
@@ -16,7 +18,7 @@ export default function App() {
   const [ctx, setCtx] = useState(null);
   const [ctxErr, setCtxErr] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [data, setData] = useState({ squads: [], members: [], positions: [], requests: [] });
+  const [data, setData] = useState({ squads: [], members: [], positions: [], requests: [], events: [] });
   const [people, setPeople] = useState([]);
   const [modal, setModal] = useState(null); // { kind, ... }
 
@@ -44,6 +46,22 @@ export default function App() {
   }, [ctx, dialog]);
 
   useEffect(() => { if (ctx?.workspaceId) reload(); }, [ctx, reload]);
+
+  // Sub-3 realtime: mọi mutation → squad_events INSERT → reload (debounce
+  // 400ms gộp nhiều event 1 lần). Resilient: mig 003 chưa apply thì
+  // subscribe vẫn chạy nhưng không có event nào (table rỗng/không publish).
+  useEffect(() => {
+    if (!ctx?.workspaceId) return;
+    let t;
+    let unsub = () => {};
+    try {
+      unsub = subscribeToTable('squad_events', ctx.workspaceId, () => {
+        clearTimeout(t);
+        t = setTimeout(() => reload(), 400);
+      });
+    } catch { /* realtime không sẵn sàng — bỏ qua, vẫn dùng ↻ tay */ }
+    return () => { clearTimeout(t); try { unsub(); } catch {} };
+  }, [ctx, reload]);
 
   const peopleMap = useMemo(
     () => Object.fromEntries(people.map((p) => [p.user_id, p])),
@@ -166,7 +184,11 @@ export default function App() {
         </div>
       )}
 
-      <footer className="oc-footer">Mushy · org-chart · Sub-1</footer>
+      {data.squads.length > 0 && (
+        <ActivityFeed events={data.events} peopleMap={peopleMap} squads={data.squads} />
+      )}
+
+      <footer className="oc-footer">Mushy · org-chart</footer>
 
       {modal && (
         <ModalHost
@@ -405,7 +427,8 @@ function ModalHost({ modal, setModal, close, ctx, data, people, positionOptions,
     return <SquadForm modal={modal} data={data} run={run} close={close} ctx={ctx} />;
   }
   if (modal.kind === 'assign-lead') {
-    return <AssignLead squad={modal.squad} options={wsMemberOptions} run={run} close={close} />;
+    return <AssignLead squad={modal.squad} options={wsMemberOptions}
+      positionOptions={positionOptions} run={run} close={close} />;
   }
   if (modal.kind === 'add-member') {
     return <AddMember squad={modal.squad} wsMemberOptions={wsMemberOptions}
@@ -504,18 +527,25 @@ function SquadForm({ modal, data, run, close, ctx }) {
   );
 }
 
-function AssignLead({ squad, options, run, close }) {
+function AssignLead({ squad, options, positionOptions, run, close }) {
   const [uid, setUid] = useState('');
-  const [pos, setPos] = useState('Lead');
+  // Mặc định OTHER='Lead' (vì 'Lead' thường không nằm trong positions quản lý)
+  const [posSel, setPosSel] = useState(OTHER);
+  const [posOther, setPosOther] = useState('Lead');
+  const pos = posSel === OTHER ? posOther.trim() : posSel;
   return (
     <Scrim close={close}>
       <h3 className="dialog-title">Gán lead · {squad.name}</h3>
       <p className="mushy-section-sub">Lead do admin chỉ định. Lead cũ (nếu có) chuyển thành member, giữ allocation.</p>
       <label className="oc-label">Chọn người</label>
       <Select value={uid} onChange={setUid} options={options} placeholder="— Chọn member workspace —" />
-      <label className="oc-label">Vai trò hiển thị</label>
-      <input className="mushy-input" value={pos} maxLength={40} onChange={(e) => setPos(e.target.value)} />
-      <button className="mushy-btn mushy-btn--primary mushy-btn--block" disabled={!uid}
+      <label className="oc-label">Vai trò trong squad</label>
+      <Select value={posSel} onChange={setPosSel} options={positionOptions} placeholder="— Chọn vai trò —" />
+      {posSel === OTHER && (
+        <input className="mushy-input" value={posOther} maxLength={40}
+          onChange={(e) => setPosOther(e.target.value)} placeholder="VD: Lead" />
+      )}
+      <button className="mushy-btn mushy-btn--primary mushy-btn--block" disabled={!uid || !pos}
         onClick={() => run(() => api.assignLead(squad.id, uid, pos), 'Đã gán squad lead.')}>
         Gán lead
       </button>
@@ -642,6 +672,40 @@ function PositionsManager({ ctx, data, reload, close, dialog }) {
       )}
       <button className="mushy-btn mushy-btn--ghost mushy-btn--block" onClick={close}>Đóng</button>
     </Scrim>
+  );
+}
+
+// Sub-3 — activity feed (movement = logs). Collapsible, default mở gọn.
+function ActivityFeed({ events, peopleMap, squads }) {
+  const [open, setOpen] = useState(false);
+  const nameOf = (uid) => personLabel(peopleMap[uid]);
+  const sqName = (sid) => squads.find((s) => s.id === sid)?.name;
+  const list = open ? events : events.slice(0, 5);
+  return (
+    <div className="oc-feed">
+      <button className="oc-feed-head" onClick={() => setOpen((o) => !o)}>
+        <span>🕑 Hoạt động gần đây ({events.length})</span>
+        <span>{open ? '▾' : '▸'}</span>
+      </button>
+      {events.length === 0 ? (
+        <div className="oc-feed-empty">Chưa có hoạt động nào.</div>
+      ) : (
+        <div className="oc-feed-list">
+          {list.map((ev) => (
+            <div key={ev.id} className="oc-feed-item">
+              <span className="oc-feed-dot" />
+              <span className="oc-feed-text">{describeEvent(ev, nameOf, sqName)}</span>
+              <span className="oc-feed-time">{timeAgo(ev.created_at)}</span>
+            </div>
+          ))}
+          {!open && events.length > 5 && (
+            <button className="oc-link-btn" onClick={() => setOpen(true)}>
+              Xem tất cả ({events.length})
+            </button>
+          )}
+        </div>
+      )}
+    </div>
   );
 }
 
