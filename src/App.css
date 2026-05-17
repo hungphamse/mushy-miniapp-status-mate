@@ -70,20 +70,31 @@
   background: var(--bg); border-radius: 14px; padding: 8px 10px;
 }
 .oc-avatar {
-  width: 34px; height: 34px; border-radius: 999px; overflow: hidden;
-  background: var(--brand); color: #fff; flex-shrink: 0;
+  width: 36px; height: 36px; border-radius: 999px; overflow: hidden;
+  background: var(--brand); color: #fff; flex: 0 0 36px;
   display: flex; align-items: center; justify-content: center;
   font-size: 14px; font-weight: 700;
 }
 .oc-avatar img { width: 100%; height: 100%; object-fit: cover; }
+/* Cả vùng tên+sub là 1 nút (ấn mở PersonActions) — canh trái, chiếm giữa */
+.oc-mem-main {
+  flex: 1 1 auto; min-width: 0;
+  display: flex; flex-direction: column; gap: 1px;
+  background: transparent; border: none; padding: 0;
+  text-align: left; cursor: pointer; font: inherit;
+}
 .oc-mem-name {
   font-size: 14px; font-weight: 600; color: var(--ink);
-  display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+  line-height: 1.25; word-break: break-word;
 }
-.oc-mem-sub { font-size: 12px; color: var(--muted); margin-top: 1px; }
+.oc-crown { margin-right: 4px; }
+.oc-mem-sub {
+  font-size: 12px; color: var(--muted); margin-top: 1px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
 .oc-alloc {
   font-size: 12.5px; font-weight: 700; border-radius: 999px;
-  padding: 3px 9px; flex-shrink: 0;
+  padding: 3px 9px; flex: 0 0 auto;
 }
 .oc-alloc--ok    { background: #E6F7F0; color: #0B7A53; }
 .oc-alloc--over  { background: #FDE8EA; color: #9B1C25; }
@@ -126,8 +137,3 @@
   background: var(--bg); border-radius: 12px; padding: 8px 10px; margin-bottom: 6px;
 }
 .oc-mini-btn.oc-ok { color: #0B7A53; border-color: #B7E3CF; }
-.oc-name-btn {
-  border: none; background: transparent; padding: 0; cursor: pointer;
-  font: inherit; color: var(--ink); text-decoration: underline;
-  text-decoration-color: var(--hairline); text-underline-offset: 2px;
-}
