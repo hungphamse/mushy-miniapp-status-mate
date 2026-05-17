@@ -69,16 +69,25 @@ export default function App() {
   );
   const totals = useMemo(() => allocationTotals(data.members), [data.members]);
 
-  // Cây: squads gom theo parent_id
+  // Squad đã lưu trữ: CHỈ admin (owner/admin workspace) thấy. Member +
+  // squad lead không thấy. Lọc hiển thị (squad_events/data vẫn đủ).
+  const visibleSquads = useMemo(
+    () => (isAdmin ? data.squads : data.squads.filter((s) => s.status !== 'archived')),
+    [data.squads, isAdmin],
+  );
+
+  // Cây: gom theo parent_id. Nếu parent bị ẩn (archived + non-admin) thì
+  // "nhấc" squad con active lên root để không biến mất khỏi cây.
   const childrenOf = useMemo(() => {
+    const visibleIds = new Set(visibleSquads.map((s) => s.id));
     const m = {};
-    for (const s of data.squads) {
-      const k = s.parent_id || '__root__';
+    for (const s of visibleSquads) {
+      const k = s.parent_id && visibleIds.has(s.parent_id) ? s.parent_id : '__root__';
       (m[k] = m[k] || []).push(s);
     }
     for (const k in m) m[k].sort((a, b) => a.name.localeCompare(b.name));
     return m;
-  }, [data.squads]);
+  }, [visibleSquads]);
 
   const membersOf = useMemo(() => {
     const m = {};
@@ -129,7 +138,7 @@ export default function App() {
         <div style={{ flex: 1, minWidth: 0 }}>
           <h1 className="hero-title">Org Chart</h1>
           <p className="hero-sub">
-            {data.squads.length} squad · {data.members.length} thành viên
+            {visibleSquads.length} squad · {data.members.length} thành viên
             {isAdmin ? ' · bạn là admin' : ''}
           </p>
         </div>
@@ -184,8 +193,8 @@ export default function App() {
         </div>
       )}
 
-      {data.squads.length > 0 && (
-        <ActivityFeed events={data.events} peopleMap={peopleMap} squads={data.squads} />
+      {visibleSquads.length > 0 && (
+        <ActivityFeed events={data.events} peopleMap={peopleMap} squads={visibleSquads} />
       )}
 
       <footer className="oc-footer">Mushy · org-chart</footer>
@@ -686,7 +695,9 @@ function ActivityFeed({ events, peopleMap, squads }) {
   const [open, setOpen] = useState(false);
   const nameOf = (uid) => personLabel(peopleMap[uid]);
   const sqName = (sid) => squads.find((s) => s.id === sid)?.name;
-  const shown = events.filter(FEED_SHOW);
+  // squads = visibleSquads → non-admin không thấy event của squad đã lưu trữ
+  const visibleSquadIds = new Set(squads.map((s) => s.id));
+  const shown = events.filter((ev) => FEED_SHOW(ev) && visibleSquadIds.has(ev.squad_id));
   const list = open ? shown : shown.slice(0, 5);
   return (
     <div className="oc-feed">
