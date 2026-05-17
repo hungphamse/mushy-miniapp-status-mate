@@ -84,7 +84,7 @@ export default function App() {
   ];
   const wsMemberOptions = people.map((p) => ({
     value: p.user_id,
-    label: personLabel(p),
+    label: personLabel(p) + (p.job_title ? ` · ${p.job_title}` : ''),
   }));
 
   const roots = childrenOf['__root__'] || [];
@@ -215,7 +215,7 @@ function SquadNode({ squad, depth, childrenOf, membersOf, peopleMap, totals, ctx
                       {mine && <span className="oc-tag">bạn</span>}
                     </div>
                     <div className="oc-mem-sub">
-                      {r.position}
+                      {r.position}{p?.job_title ? ` · ${p.job_title}` : ''}
                     </div>
                   </div>
                   <span className={`oc-alloc oc-alloc--${st}`} title={`Tổng mọi squad: ${totals[r.user_id] || 0}%`}>

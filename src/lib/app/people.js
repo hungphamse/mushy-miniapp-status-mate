@@ -2,11 +2,14 @@
 // KHÔNG bị sync-template --delete xoá; shared members.js chỉ select
 // display_name/avatar_url, org-chart cần thêm full_name/work_phone — mig
 // 020 thêm cột + RLS workspace-mate (mig 004). job_title đã chuyển
-// per-company (mig 021) → KHÔNG đọc từ user_profiles nữa.
+// per-company (mig 021) → đọc từ company_members (RLS members_select_
+// same_company cho thấy member cùng công ty). org-chart workspace-scoped
+// nên không biết companyId — gom mọi company_members caller thấy được,
+// map user_id → job_title (lấy giá trị non-null đầu tiên; đủ để hiển thị).
 
 import { dbPublic } from '../supabase.js';
 
-// → [{ user_id, ws_role, display_name, full_name, work_phone, avatar_url }]
+// → [{ user_id, ws_role, display_name, full_name, work_phone, job_title, avatar_url }]
 export async function listWorkspacePeople(workspaceId) {
   if (!workspaceId) return [];
   const { data: members, error: mErr } = await dbPublic
@@ -24,6 +27,21 @@ export async function listWorkspacePeople(workspaceId) {
   if (pErr) throw pErr;
 
   const pmap = Object.fromEntries((profiles || []).map((p) => [p.user_id, p]));
+
+  // job_title per-company (mig 021). Resilient: nếu 021 chưa apply / RLS
+  // không cho → bỏ qua, vẫn render list (không vỡ org chart).
+  const jtMap = {};
+  try {
+    const { data: cm } = await dbPublic
+      .from('company_members')
+      .select('user_id, job_title')
+      .in('user_id', ids);
+    for (const r of cm || []) {
+      const jt = r.job_title && r.job_title.trim();
+      if (jt && !jtMap[r.user_id]) jtMap[r.user_id] = jt;
+    }
+  } catch { /* 021 chưa apply hoặc RLS chặn — skip job_title */ }
+
   return members.map((m) => {
     const p = pmap[m.user_id] || {};
     return {
@@ -32,6 +50,7 @@ export async function listWorkspacePeople(workspaceId) {
       display_name: p.display_name ?? null,
       full_name: p.full_name ?? null,
       work_phone: p.work_phone ?? null,
+      job_title: jtMap[m.user_id] ?? null,
       avatar_url: p.avatar_url ?? null,
     };
   });
