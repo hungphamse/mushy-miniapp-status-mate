@@ -250,25 +250,23 @@ function SquadNode({ squad, depth, childrenOf, membersOf, peopleMap, totals,
                       ? <img src={p.avatar_url} alt="" />
                       : <span>{(personLabel(p)[0] || '?').toUpperCase()}</span>}
                   </div>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div className="oc-mem-name">
-                      {r.kind === 'lead' && <span title="Squad lead">👑 </span>}
-                      <button className="oc-name-btn"
-                        onClick={() => setModal({ kind: 'person', person: p || { user_id: r.user_id } })}>
-                        {personLabel(p)}
-                      </button>
-                      {mine && <span className="oc-tag">bạn</span>}
-                    </div>
-                    <div className="oc-mem-sub">
+                  <button className="oc-mem-main"
+                    onClick={() => setModal({ kind: 'person', person: p || { user_id: r.user_id } })}>
+                    <span className="oc-mem-name">
+                      {r.kind === 'lead' && <span className="oc-crown" title="Squad lead">👑</span>}
+                      {personLabel(p)}
+                    </span>
+                    <span className="oc-mem-sub">
                       {r.position}{p?.job_title ? ` · ${p.job_title}` : ''}
-                    </div>
-                  </div>
+                    </span>
+                  </button>
                   <span className={`oc-alloc oc-alloc--${st}`} title={`Tổng mọi squad: ${totals[r.user_id] || 0}%`}>
                     {r.allocation}%
                   </span>
                   {mine && (
                     <button className="oc-mini-btn"
-                      onClick={() => setModal({ kind: 'my-alloc', squad, row: r })}>✎</button>
+                      onClick={() => setModal({ kind: 'my-alloc', squad, row: r })}
+                      title="Sửa allocation/vai trò của tôi">✎</button>
                   )}
                 </div>
               );
