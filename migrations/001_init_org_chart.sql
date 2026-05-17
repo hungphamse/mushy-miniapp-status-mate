@@ -18,7 +18,7 @@
 --   - Helper core dùng lại: public.is_workspace_admin(ws),
 --     public.is_workspace_member(ws) (000_core / mig 004).
 --
--- ⚠️ KHÔNG viết tay "_dev" — Reviewer tự duplicate sang app_org_chart_dev.
+-- ⚠️ Chỉ ref "app_org_chart" — Reviewer tự duplicate sang schema sandbox.
 -- =====================================================================
 
 -- ---------------------------------------------------------------------
