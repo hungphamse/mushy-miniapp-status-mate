@@ -137,3 +137,24 @@
   background: var(--bg); border-radius: 12px; padding: 8px 10px; margin-bottom: 6px;
 }
 .oc-mini-btn.oc-ok { color: #0B7A53; border-color: #B7E3CF; }
+
+/* Sub-3 — activity feed */
+.oc-feed {
+  margin-top: 14px; background: var(--surface);
+  border: 1px solid var(--hairline); border-radius: 16px; overflow: hidden;
+}
+.oc-feed-head {
+  width: 100%; display: flex; align-items: center; justify-content: space-between;
+  background: transparent; border: none; cursor: pointer;
+  padding: 12px 14px; font: inherit; font-weight: 700; color: var(--ink);
+  font-size: 13.5px;
+}
+.oc-feed-empty { padding: 0 14px 14px; color: var(--muted); font-size: 12.5px; font-style: italic; }
+.oc-feed-list { padding: 0 14px 12px; display: flex; flex-direction: column; gap: 9px; }
+.oc-feed-item { display: flex; align-items: baseline; gap: 8px; font-size: 12.5px; }
+.oc-feed-dot {
+  width: 6px; height: 6px; border-radius: 999px; background: var(--brand);
+  flex: 0 0 6px; transform: translateY(-1px);
+}
+.oc-feed-text { flex: 1; color: var(--ink); line-height: 1.4; word-break: break-word; }
+.oc-feed-time { color: var(--muted); font-size: 11px; flex: 0 0 auto; white-space: nowrap; }
