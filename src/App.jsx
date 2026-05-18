@@ -7,7 +7,7 @@ import Select from './components/Select.jsx';
 import { listWorkspacePeople, personLabel } from './lib/app/people.js';
 import {
   fetchOrgChart, api, slugify, allocationTotals, allocStatus,
-  describeEvent, timeAgo,
+  describeEvent, timeAgo, formatVNPhone,
 } from './lib/app/api.js';
 import './App.css';
 
@@ -778,7 +778,7 @@ function PersonActions({ person, close, dialog }) {
           try { bridge.tel(phone); } catch (e) { dialog.error('Không gọi được', e?.message || String(e)); }
           close();
         }}>
-        📞 {phone ? `Gọi ${phone}` : 'Chưa có số điện thoại'}
+        📞 {phone ? `Gọi ${formatVNPhone(phone)}` : 'Chưa có số điện thoại'}
       </button>
 
       <button className="mushy-btn mushy-btn--ghost mushy-btn--block" disabled>
