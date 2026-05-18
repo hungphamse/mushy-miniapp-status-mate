@@ -131,3 +131,13 @@ export function timeAgo(iso) {
   if (s < 86400) return `${Math.floor(s / 3600)} giờ trước`;
   return `${Math.floor(s / 86400)} ngày trước`;
 }
+
+// SĐT VN hiển thị 0xx yyy zzzz (3-3-4, 2 space). Gọi tel: vẫn dùng raw.
+export function formatVNPhone(raw) {
+  const s = String(raw ?? '').trim();
+  const d = s.replace(/\D/g, '');
+  if (d.length === 10 && d.startsWith('0')) {
+    return `${d.slice(0, 3)} ${d.slice(3, 6)} ${d.slice(6)}`;
+  }
+  return s;
+}
