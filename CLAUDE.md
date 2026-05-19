@@ -299,7 +299,7 @@ alter table app_{slug}.tablename replica identity full;
 | `realtime.js` | `subscribeToTable(table, workspaceId, cb)`, `subscribeBroadcast()` | Trả unsubscribe — gọi khi unmount! |
 | `queue.js` | `enqueue(jobType, payload)`, `onJob(jobId, cb)` | Tác vụ nặng async qua `public.job_queue` |
 | `mushy-api.js` | `mushyApi.push({...})` | Gateway sang superapp `mini-proxy` cho privileged op (push noti remote). User JWT auth — không cần service_role. |
-| `members.js` | `listMembers(workspaceId)`, `getProfiles(userIds)` | Batch lookup workspace members + display_name/avatar_url qua `dbPublic`. RLS workspace-mate đã mở (superapp mig 004). KHÔNG dùng hash-color fallback nữa. |
+| `members.js` | `listMembers(workspaceId)`, `getProfiles(userIds)` | Batch lookup workspace members + full_name/avatar_url qua `dbPublic`. RLS workspace-mate đã mở (superapp mig 004). KHÔNG dùng hash-color fallback nữa. |
 | `theme.js` | `colors`, `radii`, `fonts`, `space`, `fontSize` | Inline style nếu cần |
 
 **Component sẵn có** (`src/components/`):
@@ -586,7 +586,7 @@ Cả 2 URL `mushy-miniapp-{slug}.vercel.app` + `mushy-miniapp-{slug}-git-dev.ver
 - ❌ Native `<select>` HTML — dùng component `Select` từ `src/components/Select.jsx`
 - ❌ `window.__APP_CONTEXT__` trực tiếp — dùng `getContext()`
 - ❌ Hardcode domain — dùng env hoặc `window.location.origin`
-- ❌ Hash-color + chữ cái UUID làm avatar fallback — RLS workspace-mate đã mở (superapp mig 004). Dùng `listMembers()` / `getProfiles()` từ `src/lib/members.js` để lấy real `display_name` + `avatar_url`. Fallback chỉ khi `avatar_url == null` (user chưa upload).
+- ❌ Hash-color + chữ cái UUID làm avatar fallback — RLS workspace-mate đã mở (superapp mig 004). Dùng `listMembers()` / `getProfiles()` từ `src/lib/members.js` để lấy real `full_name` + `avatar_url`. Fallback chỉ khi `avatar_url == null` (user chưa upload).
 - ❌ Cho phép user pinch-zoom / double-tap zoom trang. Mini-app layout đã optimize mobile + chạy in-shell, zoom làm UI vỡ + iOS auto-zoom focus input gây khó chịu. Template đã chặn ở 2 layer (đừng remove):
   - `index.html` meta viewport: `maximum-scale=1.0, user-scalable=no`
   - `theme.css` `html, body`: `touch-action: manipulation; -webkit-text-size-adjust: 100%`
@@ -618,7 +618,7 @@ Khi user nói:
 - **"Haptic / Rung phản hồi"** → `bridge.haptic('success'|'warning'|'error'|'light'|'medium'|'heavy'|'selection')`. Free UX win cho confirm/swipe action.
 - **"Quét QR"** → `bridge.scanQr()` → `{ data, type }`. Mở camera full-screen overlay trong Shell.
 - **"Xác thực sinh trắc / Face ID"** → `bridge.biometric({ promptMessage: 'Xác nhận' })` → `{ success }`. Gate action nhạy cảm. Browser luôn throw — mini-app phải có password fallback.
-- **"Hiện avatar / tên member"** (voter, comment author, mention, presence…) → `listMembers(ctx.workspaceId)` từ `src/lib/members.js` → `[{ user_id, role, display_name, avatar_url }, ...]`. Hoặc `getProfiles([uid1, uid2])` cho subset đã biết user_ids. KHÔNG dùng hash-color + chữ cái UUID — RLS workspace-mate đã cho phép real lookup (superapp migration 004).
+- **"Hiện avatar / tên member"** (voter, comment author, mention, presence…) → `listMembers(ctx.workspaceId)` từ `src/lib/members.js` → `[{ user_id, role, full_name, avatar_url }, ...]`. Hoặc `getProfiles([uid1, uid2])` cho subset đã biết user_ids. KHÔNG dùng hash-color + chữ cái UUID — RLS workspace-mate đã cho phép real lookup (superapp migration 004).
 
 Memory bên Mushy chính (đọc nếu cần):
 - `project_environments.md` — kiến trúc dev/prod, schema-per-env, dev_mode
