@@ -31,7 +31,7 @@
 .oc-squad {
   background: var(--surface);
   border: 1px solid var(--hairline);
-  border-radius: 18px;
+  border-radius: var(--r-list);
   padding: 12px 14px;
   box-shadow: 0 1px 0 rgba(15, 15, 18, 0.03);
 }
