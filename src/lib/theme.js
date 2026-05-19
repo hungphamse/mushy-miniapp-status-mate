@@ -24,11 +24,13 @@ export const colors = {
   danger: '#E63946',
 };
 
+// Giảm bo góc (sếp Huy 2026-05-19): card 28→20, list/tile → 14, pill 999.
 export const radii = {
-  card: 28,
+  card: 20,
   button: 999,  // pill
   input: 999,
-  tile: 18,
+  tile: 14,
+  list: 14,     // list item / info row
 };
 
 export const fonts = {

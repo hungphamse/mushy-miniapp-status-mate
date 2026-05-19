@@ -7,11 +7,13 @@
 // Usage:
 //   import { listMembers, getProfiles } from './lib/members.js';
 //   const members = await listMembers(ctx.workspaceId);
-//   // [{ user_id, role, display_name, avatar_url }, ...]
+//   // [{ user_id, role, full_name, avatar_url }, ...]
 //
 //   // Hoặc chỉ cần profile cho 1 subset user_ids đã biết (vd voters list):
 //   const profileMap = await getProfiles([uid1, uid2, uid3]);
-//   // { uid1: { user_id, display_name, avatar_url }, ... }
+//   // { uid1: { user_id, full_name, avatar_url }, ... }
+//
+// Biệt danh display_name đã bỏ (superapp mig 023) — chỉ còn full_name.
 
 import { dbPublic } from './supabase.js';
 
@@ -29,7 +31,7 @@ export async function listMembers(workspaceId) {
   return rows.map((r) => ({
     user_id: r.user_id,
     role: r.role,
-    display_name: profileMap[r.user_id]?.display_name ?? null,
+    full_name: profileMap[r.user_id]?.full_name ?? null,
     avatar_url: profileMap[r.user_id]?.avatar_url ?? null,
   }));
 }
@@ -38,7 +40,7 @@ export async function getProfiles(userIds) {
   if (!userIds?.length) return {};
   const { data, error } = await dbPublic
     .from('user_profiles')
-    .select('user_id, display_name, avatar_url')
+    .select('user_id, full_name, avatar_url')
     .in('user_id', userIds);
   if (error) throw error;
   return Object.fromEntries((data || []).map((p) => [p.user_id, p]));

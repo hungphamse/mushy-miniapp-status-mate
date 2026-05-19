@@ -1,7 +1,8 @@
 // People lookup cho org-chart — app-specific (đặt trong src/lib/app/ để
 // KHÔNG bị sync-template --delete xoá; shared members.js chỉ select
-// display_name/avatar_url, org-chart cần thêm full_name/work_phone — mig
-// 020 thêm cột + RLS workspace-mate (mig 004). job_title đã chuyển
+// full_name/avatar_url, org-chart cần thêm work_phone — mig 020 thêm cột
+// + RLS workspace-mate (mig 004). Biệt danh display_name đã bỏ (mig 023).
+// job_title đã chuyển
 // per-company (mig 021) → đọc từ company_members (RLS members_select_
 // same_company cho thấy member cùng công ty). org-chart workspace-scoped
 // nên không biết companyId — gom mọi company_members caller thấy được,
@@ -9,7 +10,7 @@
 
 import { dbPublic } from '../supabase.js';
 
-// → [{ user_id, ws_role, display_name, full_name, work_phone, job_title, avatar_url }]
+// → [{ user_id, ws_role, full_name, work_phone, job_title, avatar_url }]
 export async function listWorkspacePeople(workspaceId) {
   if (!workspaceId) return [];
   const { data: members, error: mErr } = await dbPublic
@@ -22,7 +23,7 @@ export async function listWorkspacePeople(workspaceId) {
   const ids = members.map((m) => m.user_id);
   const { data: profiles, error: pErr } = await dbPublic
     .from('user_profiles')
-    .select('user_id, display_name, full_name, work_phone, avatar_url')
+    .select('user_id, full_name, work_phone, avatar_url')
     .in('user_id', ids);
   if (pErr) throw pErr;
 
@@ -47,7 +48,6 @@ export async function listWorkspacePeople(workspaceId) {
     return {
       user_id: m.user_id,
       ws_role: m.role,
-      display_name: p.display_name ?? null,
       full_name: p.full_name ?? null,
       work_phone: p.work_phone ?? null,
       job_title: jtMap[m.user_id] ?? null,
@@ -56,10 +56,8 @@ export async function listWorkspacePeople(workspaceId) {
   });
 }
 
-// Tên ưu tiên hiển thị: full_name (thật) → display_name (nickname) → fallback.
+// Tên hiển thị: full_name (thật) → fallback. Biệt danh đã bỏ (mig 023).
 export function personLabel(p) {
   if (!p) return 'Ẩn danh';
-  return (p.full_name && p.full_name.trim())
-    || (p.display_name && p.display_name.trim())
-    || 'Chưa đặt tên';
+  return (p.full_name && p.full_name.trim()) || 'Chưa đặt tên';
 }

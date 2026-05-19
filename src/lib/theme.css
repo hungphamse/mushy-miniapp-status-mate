@@ -35,10 +35,13 @@
   --danger: #E63946;
 
   /* === Radii === */
-  --r-card: 28px;
+  /* Giảm bo góc (sếp Huy 2026-05-19): app thiên về info → bo mạnh làm
+     mắt "hướng tâm", giảm scan. Card 28→20, list item → 14. Pill giữ 999. */
+  --r-card: 20px;
   --r-button: 999px;           /* pill */
   --r-input: 999px;            /* pill */
-  --r-tile: 18px;
+  --r-tile: 14px;
+  --r-list: 14px;              /* list item / info row */
 
   /* === Shadows (clay) === */
   --shadow-card: 0 8px 24px rgba(15, 15, 18, 0.06), 0 1px 0 rgba(255, 255, 255, 0.9) inset;
