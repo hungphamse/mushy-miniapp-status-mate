@@ -284,7 +284,7 @@ function SquadNode({ squad, depth, childrenOf, membersOf, peopleMap, totals,
                   <button className="oc-mem-main"
                     onClick={() => setModal({ kind: 'person', person: p || { user_id: r.user_id } })}>
                     <span className="oc-mem-name">
-                      {r.kind === 'lead' && <span className="oc-crown" title="Squad lead">👑</span>}
+                      {r.kind === 'lead' && <span className="oc-lead-tag" title="Squad lead">🌟 Lead</span>}
                       {personLabel(p)}
                     </span>
                     <span className="oc-mem-sub">
@@ -403,7 +403,7 @@ function ModalHost({ modal, setModal, close, ctx, data, people, positionOptions,
             <>
               <button className="mushy-btn mushy-btn--ghost mushy-btn--block"
                 onClick={() => setModal({ kind: 'assign-lead', squad: s })}>
-                👑 Gán squad lead
+                🌟 Gán squad lead
               </button>
               <button className="mushy-btn mushy-btn--ghost mushy-btn--block"
                 onClick={() => setModal({ kind: 'add-member', squad: s })}>
