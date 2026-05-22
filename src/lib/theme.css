@@ -22,6 +22,8 @@
   --ink: #0F0F12;              /* heading, đậm nhất */
   --text: #1A1A1F;
   --muted: #6B6770;
+  /* Placeholder mờ ~50% so với muted — KHÔNG nhầm với content thật (2026-05-22) */
+  --placeholder: rgba(107, 103, 112, 0.5);
   --hairline: rgba(15, 15, 18, 0.08);
 
   /* === Surfaces === */
@@ -185,7 +187,7 @@ input, textarea, select { font-family: inherit; font-size: inherit; }
   outline: none;
   transition: border-color 150ms ease;
 }
-.mushy-input::placeholder { color: var(--muted); }
+.mushy-input::placeholder { color: var(--placeholder); }
 .mushy-input:focus { border-color: var(--brand); }
 .mushy-input--error { border-color: var(--danger); }
 
@@ -279,7 +281,7 @@ textarea.mushy-input:focus {
   align-items: center;
   gap: 8px;
 }
-.mushy-select-placeholder { color: var(--muted); }
+.mushy-select-placeholder { color: var(--placeholder); }
 .mushy-select-icon { font-size: 16px; flex-shrink: 0; }
 .mushy-select-chevron {
   color: var(--muted);
