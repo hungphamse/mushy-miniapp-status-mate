@@ -13,6 +13,7 @@ export const colors = {
   ink: '#0F0F12',
   text: '#1A1A1F',
   muted: '#6B6770',
+  placeholder: 'rgba(107, 103, 112, 0.5)',
   hairline: 'rgba(15, 15, 18, 0.08)',
 
   bg: '#FFF7F8',
