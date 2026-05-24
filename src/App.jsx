@@ -4,6 +4,7 @@ import { bridge } from './lib/bridge.js';
 import { subscribeToTable } from './lib/realtime.js';
 import { useDialog } from './components/Dialog.jsx';
 import Select from './components/Select.jsx';
+import MemberSearchSelect from './components/MemberSearchSelect.jsx';
 import { listWorkspacePeople, personLabel } from './lib/app/people.js';
 import {
   fetchOrgChart, api, slugify, allocationTotals, allocStatus,
@@ -436,11 +437,11 @@ function ModalHost({ modal, setModal, close, ctx, data, people, positionOptions,
     return <SquadForm modal={modal} data={data} run={run} close={close} ctx={ctx} />;
   }
   if (modal.kind === 'assign-lead') {
-    return <AssignLead squad={modal.squad} options={wsMemberOptions}
+    return <AssignLead squad={modal.squad} people={people}
       positionOptions={positionOptions} run={run} close={close} />;
   }
   if (modal.kind === 'add-member') {
-    return <AddMember squad={modal.squad} wsMemberOptions={wsMemberOptions}
+    return <AddMember squad={modal.squad} people={people}
       positionOptions={positionOptions} run={run} close={close} />;
   }
   if (modal.kind === 'my-alloc') {
@@ -536,7 +537,7 @@ function SquadForm({ modal, data, run, close, ctx }) {
   );
 }
 
-function AssignLead({ squad, options, positionOptions, run, close }) {
+function AssignLead({ squad, people, positionOptions, run, close }) {
   const [uid, setUid] = useState('');
   // Mặc định OTHER='Lead' (vì 'Lead' thường không nằm trong positions quản lý)
   const [posSel, setPosSel] = useState(OTHER);
@@ -547,7 +548,7 @@ function AssignLead({ squad, options, positionOptions, run, close }) {
       <h3 className="dialog-title">Gán lead · {squad.name}</h3>
       <p className="mushy-section-sub">Lead do admin chỉ định. Lead cũ (nếu có) chuyển thành member, giữ allocation.</p>
       <label className="oc-label">Chọn người</label>
-      <Select value={uid} onChange={setUid} options={options} placeholder="— Chọn member workspace —" />
+      <MemberSearchSelect value={uid} onChange={setUid} people={people} placeholder="— Chọn member workspace —" />
       <label className="oc-label">Vai trò trong squad</label>
       <Select value={posSel} onChange={setPosSel} options={positionOptions} placeholder="— Chọn vai trò —" />
       {posSel === OTHER && (
@@ -563,7 +564,7 @@ function AssignLead({ squad, options, positionOptions, run, close }) {
   );
 }
 
-function AddMember({ squad, wsMemberOptions, positionOptions, run, close }) {
+function AddMember({ squad, people, positionOptions, run, close }) {
   const [uid, setUid] = useState('');
   const [posSel, setPosSel] = useState('');
   const [posOther, setPosOther] = useState('');
@@ -574,7 +575,7 @@ function AddMember({ squad, wsMemberOptions, positionOptions, run, close }) {
     <Scrim close={close}>
       <h3 className="dialog-title">Thêm thành viên · {squad.name}</h3>
       <label className="oc-label">Người (member workspace)</label>
-      <Select value={uid} onChange={setUid} options={wsMemberOptions} placeholder="— Chọn —" />
+      <MemberSearchSelect value={uid} onChange={setUid} people={people} placeholder="— Chọn —" />
       <label className="oc-label">Vai trò trong squad</label>
       <Select value={posSel} onChange={setPosSel} options={positionOptions} placeholder="— Chọn vai trò —" />
       {posSel === OTHER && (
