@@ -6,48 +6,31 @@
 -- org chart. Owner workspace_id = origin (ws nơi tạo) — KHÔNG unshare
 -- origin được; chỉ ws non-origin unshare. Delete: owner only, soft.
 --
--- workspace_id của org_groups = origin ws (immutable). RLS custom: SELECT
--- mở cho member của origin ws HOẶC member của ws đã subscribe (via
--- org_group_workspaces join).
+-- Thứ tự: tất cả CREATE TABLE trước (FK forward-ref OK với deferred FK
+-- check), CREATE POLICY ở cuối (policy USING/WITH CHECK reference table
+-- khác → phải đợi mọi table tồn tại trước).
 --
 -- Submit qua Admin Portal Migration Reviewer — auto-duplicate sang dev schema.
 -- =====================================================================
 
--- ---------- 1. org_groups ----------
+-- ---------- TABLES (tạo trước, RLS + policy sau) ----------
+
 create table if not exists app_org_chart.org_groups (
-  id                uuid primary key default gen_random_uuid(),
-  workspace_id      uuid not null references public.workspaces(id) on delete cascade,
-  name              text not null check (char_length(name) between 1 and 80),
-  slug              text not null,
-  description       text check (description is null or char_length(description) <= 500),
-  owner_user_id     uuid not null references auth.users(id),
-  created_by        uuid not null references auth.users(id),
-  created_at        timestamptz not null default now(),
-  deleted_at        timestamptz
+  id            uuid primary key default gen_random_uuid(),
+  workspace_id  uuid not null references public.workspaces(id) on delete cascade,
+  name          text not null check (char_length(name) between 1 and 80),
+  slug          text not null,
+  description   text check (description is null or char_length(description) <= 500),
+  owner_user_id uuid not null references auth.users(id),
+  created_by    uuid not null references auth.users(id),
+  created_at    timestamptz not null default now(),
+  deleted_at    timestamptz
 );
 create unique index if not exists idx_og_slug_unique
   on app_org_chart.org_groups (slug) where deleted_at is null;
 create index if not exists idx_og_workspace on app_org_chart.org_groups (workspace_id);
 create index if not exists idx_og_owner on app_org_chart.org_groups (owner_user_id);
 
-grant select, insert, update, delete on app_org_chart.org_groups to authenticated;
-alter table app_org_chart.org_groups enable row level security;
-
--- RLS: SELECT mở cho member của origin ws HOẶC member của ws đã subscribe.
--- WRITE chặn trực tiếp (chỉ qua RPC SECURITY DEFINER).
-drop policy if exists "workspace_isolation" on app_org_chart.org_groups;
-create policy "workspace_isolation" on app_org_chart.org_groups
-for select using (
-  workspace_id in (select workspace_id from public.workspace_members where user_id = auth.uid())
-  or id in (
-    select org_group_id from app_org_chart.org_group_workspaces
-    where workspace_id in (
-      select workspace_id from public.workspace_members where user_id = auth.uid()
-    )
-  )
-);
-
--- ---------- 2. org_group_workspaces (m:n share — workspace subscribe org_group) ----------
 create table if not exists app_org_chart.org_group_workspaces (
   id            uuid primary key default gen_random_uuid(),
   workspace_id  uuid not null references public.workspaces(id) on delete cascade,
@@ -60,18 +43,6 @@ create table if not exists app_org_chart.org_group_workspaces (
 create index if not exists idx_ogw_workspace on app_org_chart.org_group_workspaces (workspace_id);
 create index if not exists idx_ogw_group on app_org_chart.org_group_workspaces (org_group_id);
 
-grant select, insert, update, delete on app_org_chart.org_group_workspaces to authenticated;
-alter table app_org_chart.org_group_workspaces enable row level security;
-
-drop policy if exists "workspace_isolation" on app_org_chart.org_group_workspaces;
-create policy "workspace_isolation" on app_org_chart.org_group_workspaces
-for all using (
-  workspace_id in (select workspace_id from public.workspace_members where user_id = auth.uid())
-) with check (
-  workspace_id in (select workspace_id from public.workspace_members where user_id = auth.uid())
-);
-
--- ---------- 3. org_group_share_codes (mã 4 số) ----------
 create table if not exists app_org_chart.org_group_share_codes (
   id                uuid primary key default gen_random_uuid(),
   workspace_id      uuid not null references public.workspaces(id) on delete cascade,
@@ -91,8 +62,39 @@ create index if not exists idx_og_sharecode_workspace
 create index if not exists idx_og_sharecode_group
   on app_org_chart.org_group_share_codes (org_group_id);
 
+-- ---------- GRANTS + RLS enable ----------
+
+grant select, insert, update, delete on app_org_chart.org_groups to authenticated;
+grant select, insert, update, delete on app_org_chart.org_group_workspaces to authenticated;
 grant select, insert, update, delete on app_org_chart.org_group_share_codes to authenticated;
+
+alter table app_org_chart.org_groups enable row level security;
+alter table app_org_chart.org_group_workspaces enable row level security;
 alter table app_org_chart.org_group_share_codes enable row level security;
+
+-- ---------- POLICIES (sau khi mọi table đã tồn tại) ----------
+
+-- org_groups: SELECT mở cross-ws (member origin ws HOẶC member ws đã subscribe).
+drop policy if exists "workspace_isolation" on app_org_chart.org_groups;
+create policy "workspace_isolation" on app_org_chart.org_groups
+for select using (
+  workspace_id in (select workspace_id from public.workspace_members where user_id = auth.uid())
+  or id in (
+    select org_group_id from app_org_chart.org_group_workspaces
+    where workspace_id in (
+      select workspace_id from public.workspace_members where user_id = auth.uid()
+    )
+  )
+);
+
+-- org_group_workspaces + share_codes: standard workspace_isolation.
+drop policy if exists "workspace_isolation" on app_org_chart.org_group_workspaces;
+create policy "workspace_isolation" on app_org_chart.org_group_workspaces
+for all using (
+  workspace_id in (select workspace_id from public.workspace_members where user_id = auth.uid())
+) with check (
+  workspace_id in (select workspace_id from public.workspace_members where user_id = auth.uid())
+);
 
 drop policy if exists "workspace_isolation" on app_org_chart.org_group_share_codes;
 create policy "workspace_isolation" on app_org_chart.org_group_share_codes
@@ -102,7 +104,8 @@ for all using (
   workspace_id in (select workspace_id from public.workspace_members where user_id = auth.uid())
 );
 
--- ---------- 4. Helper: user có thể thấy org_group này không? ----------
+-- ---------- HELPER ----------
+
 create or replace function app_org_chart.user_can_see_org_group(p_group_id uuid)
 returns boolean
 language sql stable security definer set search_path = app_org_chart, public as $$
@@ -122,8 +125,7 @@ language sql stable security definer set search_path = app_org_chart, public as 
 $$;
 grant execute on function app_org_chart.user_can_see_org_group(uuid) to authenticated;
 
--- ---------- 5. RPC: create_org_group ----------
--- p_workspace_id = origin ws (caller phải là member của ws này).
+-- ---------- RPC: create_org_group ----------
 create or replace function app_org_chart.create_org_group(
   p_workspace_id uuid,
   p_name text,
@@ -165,8 +167,7 @@ begin
 end $$;
 grant execute on function app_org_chart.create_org_group(uuid, text, text) to authenticated;
 
--- ---------- 6. RPC: generate_org_group_share_code ----------
--- Owner group HOẶC user trong ws đã share đều gen được.
+-- ---------- RPC: generate_org_group_share_code ----------
 create or replace function app_org_chart.generate_org_group_share_code(
   p_workspace_id uuid,
   p_group_id uuid,
@@ -212,8 +213,7 @@ begin
 end $$;
 grant execute on function app_org_chart.generate_org_group_share_code(uuid, uuid, int) to authenticated;
 
--- ---------- 7. RPC: redeem_org_group_share_code ----------
--- Caller phải là owner/admin của target ws.
+-- ---------- RPC: redeem_org_group_share_code ----------
 create or replace function app_org_chart.redeem_org_group_share_code(
   p_code text,
   p_target_ws_id uuid
@@ -259,8 +259,7 @@ begin
 end $$;
 grant execute on function app_org_chart.redeem_org_group_share_code(text, uuid) to authenticated;
 
--- ---------- 8. RPC: unshare_org_group_from_workspace ----------
--- Chặn unshare origin ws (org_groups.workspace_id).
+-- ---------- RPC: unshare_org_group_from_workspace ----------
 create or replace function app_org_chart.unshare_org_group_from_workspace(
   p_group_id uuid,
   p_ws_id uuid
@@ -291,7 +290,7 @@ begin
 end $$;
 grant execute on function app_org_chart.unshare_org_group_from_workspace(uuid, uuid) to authenticated;
 
--- ---------- 9. RPC: update_org_group (owner only) ----------
+-- ---------- RPC: update_org_group (owner only) ----------
 create or replace function app_org_chart.update_org_group(
   p_group_id uuid,
   p_name text default null,
@@ -319,7 +318,7 @@ begin
 end $$;
 grant execute on function app_org_chart.update_org_group(uuid, text, text) to authenticated;
 
--- ---------- 10. RPC: delete_org_group_soft (owner only) ----------
+-- ---------- RPC: delete_org_group_soft (owner only) ----------
 create or replace function app_org_chart.delete_org_group_soft(
   p_group_id uuid,
   p_confirm_slug text
