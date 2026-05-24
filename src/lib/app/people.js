@@ -53,30 +53,32 @@ export async function listGroupPeople(groupId) {
   const pmap = Object.fromEntries((profiles || []).map((p) => [p.user_id, p]));
 
   // 4. job_title per-company + companies user thuộc (logo).
+  // Dùng RPC app_org_chart.get_users_companies (mig 009 SECURITY DEFINER)
+  // để bypass RLS public.company_members — RLS chỉ cho user thấy member
+  // cùng company → follower ws (user khác company) trả empty → không logo.
+  // RPC expose company info công khai (id, name, logo_url, job_title) cho
+  // bất kỳ authenticated — acceptable vì cross-ws sharing đã expose info này.
   const jtMap = {};
   const companiesMap = {};
   try {
-    const { data: cm } = await dbPublic
-      .from('company_members')
-      .select('user_id, job_title, company:companies(id, name, logo_url, deleted_at)')
-      .in('user_id', ids);
+    const { data: cm } = await db.rpc('get_users_companies', { p_user_ids: ids });
     const companyById = new Map();
     for (const r of cm || []) {
       const jt = r.job_title && r.job_title.trim();
       if (jt && !jtMap[r.user_id]) jtMap[r.user_id] = jt;
-      if (r.company && !r.company.deleted_at) {
-        companyById.set(r.company.id, {
-          id: r.company.id,
-          name: r.company.name,
-          logo_url: r.company.logo_url || null,
+      if (r.company_id) {
+        companyById.set(r.company_id, {
+          id: r.company_id,
+          name: r.company_name,
+          logo_url: r.logo_url || null,
         });
         if (!companiesMap[r.user_id]) companiesMap[r.user_id] = [];
-        if (!companiesMap[r.user_id].some((c) => c.id === r.company.id)) {
-          companiesMap[r.user_id].push(companyById.get(r.company.id));
+        if (!companiesMap[r.user_id].some((c) => c.id === r.company_id)) {
+          companiesMap[r.user_id].push(companyById.get(r.company_id));
         }
       }
     }
-  } catch { /* RLS chặn hoặc table chưa tồn tại — skip */ }
+  } catch { /* RPC chưa apply hoặc lỗi — skip */ }
 
   return ids.map((uid) => {
     const p = pmap[uid] || {};
