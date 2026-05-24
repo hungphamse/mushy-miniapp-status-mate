@@ -5,12 +5,16 @@ import { subscribeToTable } from './lib/realtime.js';
 import { useDialog } from './components/Dialog.jsx';
 import Select from './components/Select.jsx';
 import MemberSearchSelect from './components/MemberSearchSelect.jsx';
-import { listWorkspacePeople, personLabel } from './lib/app/people.js';
+import OrgGroupSettingsModal from './components/OrgGroupSettingsModal.jsx';
+import { listGroupPeople, personLabel } from './lib/app/people.js';
+import { listOrgGroups, createOrgGroup } from './lib/app/org-groups.js';
 import {
   fetchOrgChart, api, slugify, allocationTotals, allocStatus,
   describeEvent, timeAgo, formatVNPhone,
 } from './lib/app/api.js';
 import './App.css';
+
+const GROUP_REMEMBER_KEY = 'orgchart:last_group_id';
 
 const OTHER = '__other__';
 
@@ -22,6 +26,12 @@ export default function App() {
   const [data, setData] = useState({ squads: [], members: [], positions: [], requests: [], events: [] });
   const [people, setPeople] = useState([]);
   const [modal, setModal] = useState(null); // { kind, ... }
+  // Org groups ws đang subscribe + group đang active.
+  const [groups, setGroups] = useState(null);  // null = chưa load
+  const [activeGroupId, setActiveGroupId] = useState(() => {
+    try { return localStorage.getItem(GROUP_REMEMBER_KEY) || null; } catch { return null; }
+  });
+  const [showGroupSettings, setShowGroupSettings] = useState(false);
 
   useEffect(() => {
     try { setCtx(getContext()); } catch (e) { setCtxErr(e.message); }
@@ -29,13 +39,38 @@ export default function App() {
 
   const isAdmin = ctx && (ctx.role === 'owner' || ctx.role === 'admin');
 
-  const reload = useCallback(async () => {
+  // Load groups khi ctx sẵn sàng. Mặc định pick remembered group hoặc group đầu.
+  const reloadGroups = useCallback(async () => {
     if (!ctx?.workspaceId) return;
+    try {
+      const gs = await listOrgGroups();
+      setGroups(gs);
+      if (gs.length === 0) {
+        setActiveGroupId(null);
+      } else if (!activeGroupId || !gs.find((g) => g.id === activeGroupId)) {
+        setActiveGroupId(gs[0].id);
+      }
+    } catch (e) {
+      dialog.error('Không tải được org groups', e?.message || String(e));
+      setGroups([]);
+    }
+  }, [ctx, dialog, activeGroupId]);
+  useEffect(() => { if (ctx?.workspaceId) reloadGroups(); }, [ctx?.workspaceId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Persist active group.
+  useEffect(() => {
+    if (activeGroupId) {
+      try { localStorage.setItem(GROUP_REMEMBER_KEY, activeGroupId); } catch {}
+    }
+  }, [activeGroupId]);
+
+  const reload = useCallback(async () => {
+    if (!activeGroupId) { setData({ squads: [], members: [], positions: [], requests: [], events: [] }); setPeople([]); setLoading(false); return; }
     setLoading(true);
     try {
       const [oc, ppl] = await Promise.all([
-        fetchOrgChart(ctx.workspaceId),
-        listWorkspacePeople(ctx.workspaceId),
+        fetchOrgChart(activeGroupId),
+        listGroupPeople(activeGroupId),
       ]);
       setData(oc);
       setPeople(ppl);
@@ -44,13 +79,14 @@ export default function App() {
     } finally {
       setLoading(false);
     }
-  }, [ctx, dialog]);
+  }, [activeGroupId, dialog]);
 
-  useEffect(() => { if (ctx?.workspaceId) reload(); }, [ctx, reload]);
+  useEffect(() => { if (activeGroupId) reload(); }, [activeGroupId, reload]);
 
-  // Sub-3 realtime: mọi mutation → squad_events INSERT → reload (debounce
-  // 400ms gộp nhiều event 1 lần). Resilient: mig 003 chưa apply thì
-  // subscribe vẫn chạy nhưng không có event nào (table rỗng/không publish).
+  // Realtime subscribe theo workspace_id (PostgREST realtime filter chỉ
+  // support eq trên column thật). Ta vẫn subscribe theo ctx.workspaceId
+  // — events INSERT cho ws hiện tại sẽ trigger reload. Cross-ws events
+  // (squad_events ws khác cùng group) sẽ miss realtime, chờ ↻ tay.
   useEffect(() => {
     if (!ctx?.workspaceId) return;
     let t;
@@ -143,10 +179,41 @@ export default function App() {
             {isAdmin ? ' · bạn là admin' : ''}
           </p>
         </div>
+        <button className="mushy-btn mushy-btn--ghost oc-refresh" title="Org Groups"
+          onClick={() => setShowGroupSettings(true)}>
+          🏢
+        </button>
         <button className="mushy-btn mushy-btn--ghost oc-refresh" onClick={reload} disabled={loading}>
           {loading ? <span className="mushy-spinner" /> : '↻'}
         </button>
       </header>
+
+      {groups !== null && groups.length === 0 && (
+        <div className="mushy-card" style={{ marginBottom: 14 }}>
+          <h2 className="mushy-section-title">Chưa có org group</h2>
+          <p className="mushy-section-sub" style={{ marginBottom: 12 }}>
+            Workspace chưa thuộc org group nào. Tạo group mới (workspace là origin) hoặc nhập mã share để subscribe group của workspace khác.
+          </p>
+          <button className="mushy-btn mushy-btn--primary"
+            onClick={() => setShowGroupSettings(true)}>
+            🏢 Mở Org Groups
+          </button>
+        </div>
+      )}
+
+      {groups !== null && groups.length > 1 && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+          <label className="mushy-label" style={{ margin: 0, fontSize: 13 }}>Org group:</label>
+          <div style={{ flex: 1 }}>
+            <Select
+              value={activeGroupId || ''}
+              onChange={setActiveGroupId}
+              options={groups.map((g) => ({ value: g.id, label: g.name }))}
+              placeholder="— Chọn —"
+            />
+          </div>
+        </div>
+      )}
 
       {myInAny && allocStatus(myTotal) !== 'ok' && (
         <div className={`oc-banner oc-banner--${allocStatus(myTotal)}`}>
@@ -203,9 +270,16 @@ export default function App() {
       {modal && (
         <ModalHost
           modal={modal} setModal={setModal} close={() => setModal(null)}
-          ctx={ctx} data={data} people={people}
+          ctx={ctx} activeGroupId={activeGroupId} data={data} people={people}
           positionOptions={positionOptions} wsMemberOptions={wsMemberOptions}
           dialog={dialog} reload={reload}
+        />
+      )}
+
+      {showGroupSettings && (
+        <OrgGroupSettingsModal
+          onClose={() => setShowGroupSettings(false)}
+          onChange={reloadGroups}
         />
       )}
     </div>
@@ -389,7 +463,7 @@ function SquadNode({ squad, depth, childrenOf, membersOf, peopleMap, totals,
 }
 
 // ---------------- Modal host ----------------
-function ModalHost({ modal, setModal, close, ctx, data, people, positionOptions, wsMemberOptions, dialog, reload }) {
+function ModalHost({ modal, setModal, close, ctx, activeGroupId, data, people, positionOptions, wsMemberOptions, dialog, reload }) {
   const run = async (fn, okMsg) => {
     try {
       await fn();
@@ -448,7 +522,7 @@ function ModalHost({ modal, setModal, close, ctx, data, people, positionOptions,
   }
 
   if (modal.kind === 'create-squad' || modal.kind === 'edit-squad') {
-    return <SquadForm modal={modal} data={data} run={run} close={close} ctx={ctx} />;
+    return <SquadForm modal={modal} data={data} run={run} close={close} ctx={ctx} activeGroupId={activeGroupId} />;
   }
   if (modal.kind === 'assign-lead') {
     return <AssignLead squad={modal.squad} people={people}
@@ -463,7 +537,7 @@ function ModalHost({ modal, setModal, close, ctx, data, people, positionOptions,
       positionOptions={positionOptions} run={run} close={close} />;
   }
   if (modal.kind === 'positions') {
-    return <PositionsManager ctx={ctx} data={data} reload={reload} close={close} dialog={dialog} />;
+    return <PositionsManager ctx={ctx} activeGroupId={activeGroupId} data={data} reload={reload} close={close} dialog={dialog} />;
   }
   if (modal.kind === 'request-join') {
     return <RequestJoin squad={modal.squad} positionOptions={positionOptions}
@@ -485,7 +559,7 @@ function Scrim({ children, close }) {
   );
 }
 
-function SquadForm({ modal, data, run, close, ctx }) {
+function SquadForm({ modal, data, run, close, ctx, activeGroupId }) {
   const editing = modal.kind === 'edit-squad';
   const s = modal.squad;
   const [name, setName] = useState(editing ? s.name : '');
@@ -540,7 +614,7 @@ function SquadForm({ modal, data, run, close, ctx }) {
               ? { intro }
               : { name, intro, parent: parent || null }), 'Đã lưu squad.');
           } else {
-            run(() => api.createSquad(ctx.workspaceId, name.trim(),
+            run(() => api.createSquad(activeGroupId, name.trim(),
               slug.trim().toLowerCase(), parent || null, intro), 'Đã tạo squad.');
           }
         }}>
@@ -638,7 +712,7 @@ function MyAlloc({ row, squad, positionOptions, run, close }) {
   );
 }
 
-function PositionsManager({ ctx, data, reload, close, dialog }) {
+function PositionsManager({ ctx, activeGroupId, data, reload, close, dialog }) {
   const [name, setName] = useState('');
   const [busy, setBusy] = useState(false);
   const admin = ctx.role === 'owner' || ctx.role === 'admin';
@@ -659,7 +733,7 @@ function PositionsManager({ ctx, data, reload, close, dialog }) {
 
       {data.positions.length === 0 ? (
         <button className="mushy-btn mushy-btn--primary mushy-btn--block" disabled={busy}
-          onClick={() => act(() => api.seedPositions(ctx.workspaceId))}>
+          onClick={() => act(() => api.seedPositions(activeGroupId))}>
           {busy ? <span className="mushy-spinner" /> : 'Tạo bộ mặc định (Product, Tech, Design, QC, Ops)'}
         </button>
       ) : (
@@ -688,7 +762,7 @@ function PositionsManager({ ctx, data, reload, close, dialog }) {
               onChange={(e) => setName(e.target.value)} placeholder="VD: Data" />
             <button className="mushy-btn mushy-btn--primary" disabled={busy || !name.trim()}
               onClick={() => act(async () => {
-                await api.createPosition(ctx.workspaceId, name.trim());
+                await api.createPosition(activeGroupId, name.trim());
                 setName('');
               })}>Thêm</button>
           </div>

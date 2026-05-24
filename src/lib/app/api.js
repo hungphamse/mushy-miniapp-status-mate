@@ -1,18 +1,17 @@
 // org-chart data access — app-specific (src/lib/app/ né sync --delete).
-// Mọi query scope .eq('workspace_id', ws) (RLS không chặn cross-workspace
-// cùng user — CLAUDE.md §3.4). Mutation đi qua RPC SECURITY DEFINER.
+// Sau mig 006+007 (sync org-group), mọi query scope theo org_group_id
+// thay vì workspace_id. RLS check membership qua join org_group_workspaces.
 
 import { db } from '../supabase.js';
 
-export async function fetchOrgChart(ws) {
+export async function fetchOrgChart(groupId) {
+  if (!groupId) return { squads: [], members: [], positions: [], requests: [], events: [] };
   const [squadsR, membersR, positionsR, reqR, evR] = await Promise.all([
-    db.from('squads').select('*').eq('workspace_id', ws),
-    db.from('squad_members').select('*').eq('workspace_id', ws).is('left_at', null),
-    db.from('positions').select('*').eq('workspace_id', ws).order('sort_order', { ascending: true }),
-    // Sub-2: pending requests. Resilient nếu mig 002 chưa apply.
-    db.from('membership_requests').select('*').eq('workspace_id', ws).eq('status', 'pending'),
-    // Sub-3: activity feed. Resilient nếu mig 003 chưa apply.
-    db.from('squad_events').select('*').eq('workspace_id', ws)
+    db.from('squads').select('*').eq('org_group_id', groupId),
+    db.from('squad_members').select('*').eq('org_group_id', groupId).is('left_at', null),
+    db.from('positions').select('*').eq('org_group_id', groupId).order('sort_order', { ascending: true }),
+    db.from('membership_requests').select('*').eq('org_group_id', groupId).eq('status', 'pending'),
+    db.from('squad_events').select('*').eq('org_group_id', groupId)
       .order('created_at', { ascending: false }).limit(40),
   ]);
   if (squadsR.error) throw squadsR.error;
@@ -34,9 +33,9 @@ const call = async (fn, args) => {
 };
 
 export const api = {
-  seedPositions: (p_ws) => call('seed_default_positions', { p_ws }),
-  createSquad: (p_ws, p_name, p_slug, p_parent, p_intro) =>
-    call('create_squad', { p_ws, p_name, p_slug, p_parent: p_parent || null, p_intro: p_intro || null }),
+  seedPositions: (p_group_id) => call('seed_default_positions', { p_group_id }),
+  createSquad: (p_group_id, p_name, p_slug, p_parent, p_intro) =>
+    call('create_squad', { p_group_id, p_name, p_slug, p_parent: p_parent || null, p_intro: p_intro || null }),
   updateSquad: (p_id, patch) =>
     call('update_squad', {
       p_id,
@@ -47,14 +46,13 @@ export const api = {
     }),
   assignLead: (p_squad, p_user, p_position) =>
     call('assign_squad_lead', { p_squad, p_user, p_position: p_position || 'Lead' }),
-  createPosition: (p_ws, p_name) => call('create_position', { p_ws, p_name }),
+  createPosition: (p_group_id, p_name) => call('create_position', { p_group_id, p_name }),
   deletePosition: (p_id) => call('delete_position', { p_id }),
   adminSetMember: (p_squad, p_user, p_position, p_allocation, p_kind = 'member') =>
     call('admin_set_member', { p_squad, p_user, p_position, p_allocation, p_kind }),
   removeMember: (p_squad, p_user) => call('remove_member', { p_squad, p_user }),
   setMyAllocation: (p_squad, p_allocation, p_position) =>
     call('set_my_allocation', { p_squad, p_allocation, p_position }),
-  // Sub-2 — member tự xin vào/rời, lead duyệt
   requestMembership: (p_squad, p_type, p_position, p_allocation, p_message) =>
     call('request_membership', {
       p_squad, p_type,
@@ -70,7 +68,7 @@ export const api = {
 // slug từ tên: bỏ dấu, lowercase, gạch nối. Min 2 ký tự (regex squad.slug).
 export function slugify(name) {
   const s = (name || '')
-    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .normalize('NFD').replace(/[̀-ͯ]/g, '')
     .replace(/đ/g, 'd').replace(/Đ/g, 'd')
     .toLowerCase().trim()
     .replace(/[^a-z0-9]+/g, '-')
@@ -112,7 +110,7 @@ export function describeEvent(ev, nameOf, squadName) {
     case 'allocation_changed':
       return `${who} chỉnh allocation “${sq}” → ${p.allocation ?? 0}% (${p.position || '—'})`;
     case 'request_created':
-      return `${who} xin ${p.req_type === 'leave' ? 'rời' : 'vào'} “${sq}”`;
+      return `${who} đăng ký ${p.req_type === 'leave' ? 'rời' : 'vào'} “${sq}”`;
     case 'request_approved':
       return `${actor} duyệt yêu cầu ${p.req_type === 'leave' ? 'rời' : 'vào'} “${sq}” của ${who}`;
     case 'request_rejected':
