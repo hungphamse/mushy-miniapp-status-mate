@@ -32,6 +32,15 @@ export default function App() {
     try { return localStorage.getItem(GROUP_REMEMBER_KEY) || null; } catch { return null; }
   });
   const [showGroupSettings, setShowGroupSettings] = useState(false);
+  // Open/close state per squad — default tất cả collapsed. Map id → true (open).
+  const [openMap, setOpenMap] = useState({});
+  const toggleOpen = useCallback((id) => {
+    setOpenMap((m) => ({ ...m, [id]: !m[id] }));
+  }, []);
+  const expandAll = useCallback(() => {
+    setOpenMap(Object.fromEntries(data.squads.map((s) => [s.id, true])));
+  }, [data.squads]);
+  const collapseAll = useCallback(() => setOpenMap({}), []);
 
   useEffect(() => {
     try { setCtx(getContext()); } catch (e) { setCtxErr(e.message); }
@@ -247,18 +256,25 @@ export default function App() {
           </p>
         </div>
       ) : (
-        <div className="oc-tree">
-          {roots.map((s) => (
-            <SquadNode
-              key={s.id} squad={s} depth={0}
-              childrenOf={childrenOf} membersOf={membersOf}
-              peopleMap={peopleMap} totals={totals}
-              requestsBySquad={requestsBySquad} myPending={myPending}
-              ctx={ctx} isAdmin={isAdmin} setModal={setModal}
-              reload={reload} dialog={dialog}
-            />
-          ))}
-        </div>
+        <>
+          <div className="oc-tree-controls">
+            <button className="oc-tree-control-btn" onClick={expandAll}>↕ Mở hết</button>
+            <button className="oc-tree-control-btn" onClick={collapseAll}>↕ Đóng hết</button>
+          </div>
+          <div className="oc-tree">
+            {roots.map((s) => (
+              <SquadNode
+                key={s.id} squad={s} depth={0}
+                childrenOf={childrenOf} membersOf={membersOf}
+                peopleMap={peopleMap} totals={totals}
+                requestsBySquad={requestsBySquad} myPending={myPending}
+                ctx={ctx} isAdmin={isAdmin} setModal={setModal}
+                reload={reload} dialog={dialog}
+                openMap={openMap} toggleOpen={toggleOpen}
+              />
+            ))}
+          </div>
+        </>
       )}
 
       {visibleSquads.length > 0 && (
@@ -288,8 +304,9 @@ export default function App() {
 
 // ---------------- Squad node (đệ quy, collapsible) ----------------
 function SquadNode({ squad, depth, childrenOf, membersOf, peopleMap, totals,
-  requestsBySquad, myPending, ctx, isAdmin, setModal, reload, dialog }) {
-  const [open, setOpen] = useState(depth < 2);
+  requestsBySquad, myPending, ctx, isAdmin, setModal, reload, dialog,
+  openMap, toggleOpen }) {
+  const open = !!openMap[squad.id];
   const [busy, setBusy] = useState(false);
   const kids = childrenOf[squad.id] || [];
   const mem = (membersOf[squad.id] || []).slice().sort((a, b) => {
@@ -326,13 +343,20 @@ function SquadNode({ squad, depth, childrenOf, membersOf, peopleMap, totals,
     <div className="oc-node" style={{ marginLeft: depth ? 14 : 0 }}>
       <div className={`oc-squad ${archived ? 'oc-squad--archived' : ''}`}>
         <div className="oc-squad-head">
-          <button className="oc-collapse" onClick={() => setOpen((o) => !o)}>
+          <button className="oc-collapse" onClick={() => toggleOpen(squad.id)}>
             {kids.length || mem.length ? (open ? '▾' : '▸') : '•'}
           </button>
           <div style={{ flex: 1, minWidth: 0 }}>
             <div className="oc-squad-title">
               {squad.name}
               {archived && <span className="oc-tag oc-tag--muted">đã lưu trữ</span>}
+              {!open && (mem.length > 0 || kids.length > 0) && (
+                <span className="oc-squad-counts">
+                  {mem.length > 0 && <span>{mem.length} người</span>}
+                  {mem.length > 0 && kids.length > 0 && <span> · </span>}
+                  {kids.length > 0 && <span>{kids.length} squad con</span>}
+                </span>
+              )}
             </div>
             {squad.intro && open && <p className="oc-intro">{squad.intro}</p>}
           </div>
@@ -456,7 +480,8 @@ function SquadNode({ squad, depth, childrenOf, membersOf, peopleMap, totals,
           peopleMap={peopleMap} totals={totals}
           requestsBySquad={requestsBySquad} myPending={myPending}
           ctx={ctx} isAdmin={isAdmin} setModal={setModal}
-          reload={reload} dialog={dialog} />
+          reload={reload} dialog={dialog}
+          openMap={openMap} toggleOpen={toggleOpen} />
       ))}
     </div>
   );
