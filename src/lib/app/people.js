@@ -44,11 +44,11 @@ export async function listGroupPeople(groupId) {
   }
   const ids = Array.from(userRole.keys());
 
-  // 3. Profiles.
-  const { data: profiles, error: pErr } = await dbPublic
-    .from('user_profiles')
-    .select('user_id, full_name, work_phone, avatar_url, work_email, personal_email')
-    .in('user_id', ids);
+  // 3. Profiles via RPC SECURITY DEFINER (mig 010) bypass RLS user_profiles.
+  // RLS user_profiles chỉ cho user thấy profile cùng workspace → follower ws
+  // sẽ "Ẩn danh" mọi member origin → cần bypass.
+  const { data: profiles, error: pErr } = await db.rpc('get_users_basic_profiles',
+    { p_user_ids: ids });
   if (pErr) throw pErr;
   const pmap = Object.fromEntries((profiles || []).map((p) => [p.user_id, p]));
 
