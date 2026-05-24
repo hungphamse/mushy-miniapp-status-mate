@@ -15,9 +15,7 @@
 --     unshare được. Origin = workspace owner-org_group đã tạo lần đầu.
 --   - Delete org_group: soft (deleted_at). Chỉ owner_user_id.
 --
--- ⚠️ APPLY 2 LẦN:
---   1. Paste as-is (prod schema app_org_chart).
---   2. Replace mọi 'app_org_chart' → 'app_org_chart_dev' rồi paste lần 2.
+-- Submit qua Admin Portal Migration Reviewer — auto-duplicate sang dev schema.
 -- =====================================================================
 
 -- ---------- 1. org_groups ----------

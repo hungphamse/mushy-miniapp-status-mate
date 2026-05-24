@@ -13,9 +13,7 @@
 --   - Mig 007: rewrite RPCs để check group permission (BREAKING — code
 --     mới phải deploy đồng bộ).
 --
--- ⚠️ APPLY 2 LẦN:
---   1. Paste as-is (prod schema app_org_chart).
---   2. Replace mọi 'app_org_chart' → 'app_org_chart_dev' rồi paste lần 2.
+-- Submit qua Admin Portal Migration Reviewer — auto-duplicate sang dev schema.
 -- =====================================================================
 
 -- ---------- squads ----------
