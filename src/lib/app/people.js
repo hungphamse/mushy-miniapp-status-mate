@@ -25,24 +25,45 @@ export async function listGroupPeople(groupId) {
   const wsIds = (gw || []).map((r) => r.workspace_id);
   if (wsIds.length === 0) return [];
 
-  // 2. workspace_members của các ws đó.
+  // 2a. workspace_members của các ws đó.
   const { data: members, error: mErr } = await dbPublic
     .from('workspace_members')
     .select('user_id, role')
     .in('workspace_id', wsIds);
   if (mErr) throw mErr;
-  if (!members?.length) return [];
 
-  // Dedupe user_id, giữ role cao nhất.
+  // 2b. squad_members + lead_user_id của group — bao gồm cả user join via
+  // email_domain (chưa ở workspace_members nhưng đã trong cây org chart),
+  // hoặc legacy member đã rời ws nhưng squad_members row chưa cleanup.
+  // Mig 008 RLS group-scoped cho phép SELECT.
+  const { data: smRows } = await db
+    .from('squad_members')
+    .select('user_id')
+    .eq('org_group_id', groupId);
+  const { data: leadRows } = await db
+    .from('squads')
+    .select('lead_user_id')
+    .eq('org_group_id', groupId)
+    .not('lead_user_id', 'is', null);
+
+  // Dedupe user_id, giữ role cao nhất (từ workspace_members).
   const ROLE_RANK = { owner: 3, admin: 2, member: 1 };
   const userRole = new Map();
-  for (const m of members) {
+  for (const m of members || []) {
     const prev = userRole.get(m.user_id);
     if (!prev || (ROLE_RANK[m.role] || 0) > (ROLE_RANK[prev] || 0)) {
       userRole.set(m.user_id, m.role);
     }
   }
+  // Thêm user_ids từ squad_members + leads chưa có trong workspace_members.
+  for (const r of smRows || []) {
+    if (!userRole.has(r.user_id)) userRole.set(r.user_id, 'member');
+  }
+  for (const r of leadRows || []) {
+    if (!userRole.has(r.lead_user_id)) userRole.set(r.lead_user_id, 'member');
+  }
   const ids = Array.from(userRole.keys());
+  if (ids.length === 0) return [];
 
   // 3. Profiles via RPC SECURITY DEFINER (mig 010) bypass RLS user_profiles.
   // RLS user_profiles chỉ cho user thấy profile cùng workspace → follower ws
