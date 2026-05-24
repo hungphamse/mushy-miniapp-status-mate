@@ -239,7 +239,7 @@ function SquadNode({ squad, depth, childrenOf, membersOf, peopleMap, totals,
   };
 
   async function reqLeave() {
-    const ok = await dialog.confirm('Xin rời squad?',
+    const ok = await dialog.confirm('Đăng ký rời squad?',
       `Gửi yêu cầu rời “${squad.name}”. Squad lead / admin sẽ duyệt.`);
     if (ok) act(() => api.requestMembership(squad.id, 'leave'));
   }
@@ -311,18 +311,18 @@ function SquadNode({ squad, depth, childrenOf, membersOf, peopleMap, totals,
             {myReq ? (
               <div className="oc-req-mine">
                 <span className="oc-tag oc-tag--muted">
-                  ⏳ Đang chờ duyệt: {myReq.type === 'join' ? 'xin vào' : 'xin rời'}
+                  ⏳ Đang chờ duyệt: {myReq.type === 'join' ? 'đăng ký vào' : 'đăng ký rời'}
                 </span>
                 <button className="oc-mini-btn" disabled={busy} onClick={cancelReq}>Huỷ</button>
               </div>
             ) : myActive ? (
               <button className="oc-link-btn" disabled={busy} onClick={reqLeave}>
-                Xin rời squad →
+                Đăng ký rời squad →
               </button>
             ) : (
               <button className="oc-link-btn" disabled={busy}
                 onClick={() => setModal({ kind: 'request-join', squad })}>
-                + Xin vào squad
+                + Đăng ký vào squad
               </button>
             )}
           </div>
@@ -339,7 +339,7 @@ function SquadNode({ squad, depth, childrenOf, membersOf, peopleMap, totals,
                     <div className="oc-mem-name">
                       {personLabel(rp)}
                       <span className={`oc-tag ${r.type === 'leave' ? 'oc-tag--muted' : ''}`}>
-                        {r.type === 'join' ? 'xin vào' : 'xin rời'}
+                        {r.type === 'join' ? 'đăng ký vào' : 'đăng ký rời'}
                       </span>
                     </div>
                     <div className="oc-mem-sub">
@@ -738,7 +738,7 @@ function RequestJoin({ squad, positionOptions, run, close }) {
   const allocN = Math.max(0, Math.min(100, parseInt(alloc || '0', 10) || 0));
   return (
     <Scrim close={close}>
-      <h3 className="dialog-title">Xin vào · {squad.name}</h3>
+      <h3 className="dialog-title">Đăng ký vào · {squad.name}</h3>
       <p className="mushy-section-sub">Squad lead / admin sẽ duyệt yêu cầu.</p>
       <label className="oc-label">Vai trò bạn muốn</label>
       <Select value={posSel} onChange={setPosSel} options={positionOptions} placeholder="— Chọn vai trò —" />
@@ -755,7 +755,7 @@ function RequestJoin({ squad, positionOptions, run, close }) {
       <button className="mushy-btn mushy-btn--primary mushy-btn--block" disabled={!pos}
         onClick={() => run(
           () => api.requestMembership(squad.id, 'join', pos, allocN, msg.trim() || null),
-          'Đã gửi yêu cầu xin vào — chờ duyệt.')}>
+          'Đã gửi yêu cầu đăng ký vào — chờ duyệt.')}>
         Gửi yêu cầu
       </button>
       <button className="mushy-btn mushy-btn--ghost mushy-btn--block" onClick={close}>Huỷ</button>
