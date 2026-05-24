@@ -29,19 +29,33 @@ export async function listWorkspacePeople(workspaceId) {
 
   const pmap = Object.fromEntries((profiles || []).map((p) => [p.user_id, p]));
 
-  // job_title per-company (mig 021). Resilient: nếu 021 chưa apply / RLS
-  // không cho → bỏ qua, vẫn render list (không vỡ org chart).
+  // job_title per-company (mig 021) + companies user thuộc (để hiển thị
+  // logo công ty trong member row, phân biệt user thuộc cty nào).
+  // Resilient: nếu 021 chưa apply / RLS không cho → bỏ qua.
   const jtMap = {};
+  const companiesMap = {};  // user_id → [{ id, name, logo_url }]
   try {
     const { data: cm } = await dbPublic
       .from('company_members')
-      .select('user_id, job_title')
+      .select('user_id, job_title, company:companies(id, name, logo_url, deleted_at)')
       .in('user_id', ids);
+    const companyById = new Map();
     for (const r of cm || []) {
       const jt = r.job_title && r.job_title.trim();
       if (jt && !jtMap[r.user_id]) jtMap[r.user_id] = jt;
+      if (r.company && !r.company.deleted_at) {
+        companyById.set(r.company.id, {
+          id: r.company.id,
+          name: r.company.name,
+          logo_url: r.company.logo_url || null,
+        });
+        if (!companiesMap[r.user_id]) companiesMap[r.user_id] = [];
+        if (!companiesMap[r.user_id].some((c) => c.id === r.company.id)) {
+          companiesMap[r.user_id].push(companyById.get(r.company.id));
+        }
+      }
     }
-  } catch { /* 021 chưa apply hoặc RLS chặn — skip job_title */ }
+  } catch { /* 021 chưa apply hoặc RLS chặn — skip job_title + companies */ }
 
   return members.map((m) => {
     const p = pmap[m.user_id] || {};
@@ -54,6 +68,7 @@ export async function listWorkspacePeople(workspaceId) {
       personal_email: p.personal_email ?? null,
       job_title: jtMap[m.user_id] ?? null,
       avatar_url: p.avatar_url ?? null,
+      companies: companiesMap[m.user_id] || [],
     };
   });
 }

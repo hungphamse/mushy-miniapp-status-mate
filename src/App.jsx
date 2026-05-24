@@ -295,6 +295,20 @@ function SquadNode({ squad, depth, childrenOf, membersOf, peopleMap, totals,
                   <span className={`oc-alloc oc-alloc--${st}`} title={`Tổng mọi squad: ${totals[r.user_id] || 0}%`}>
                     {r.allocation}%
                   </span>
+                  {p?.companies?.length > 0 && (
+                    <span className="oc-company-cluster" title={p.companies.map((c) => c.name).join(', ')}>
+                      {p.companies.slice(0, 2).map((c) => (
+                        <span key={c.id} className="oc-company-badge" title={c.name}>
+                          {c.logo_url
+                            ? <img src={c.logo_url} alt={c.name} />
+                            : <span className="oc-company-initial">{(c.name?.[0] || '?').toUpperCase()}</span>}
+                        </span>
+                      ))}
+                      {p.companies.length > 2 && (
+                        <span className="oc-company-more">+{p.companies.length - 2}</span>
+                      )}
+                    </span>
+                  )}
                   {mine && (
                     <button className="oc-mini-btn"
                       onClick={() => setModal({ kind: 'my-alloc', squad, row: r })}
