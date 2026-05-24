@@ -23,7 +23,7 @@ export async function listWorkspacePeople(workspaceId) {
   const ids = members.map((m) => m.user_id);
   const { data: profiles, error: pErr } = await dbPublic
     .from('user_profiles')
-    .select('user_id, full_name, work_phone, avatar_url')
+    .select('user_id, full_name, work_phone, avatar_url, work_email, personal_email')
     .in('user_id', ids);
   if (pErr) throw pErr;
 
@@ -50,6 +50,8 @@ export async function listWorkspacePeople(workspaceId) {
       ws_role: m.role,
       full_name: p.full_name ?? null,
       work_phone: p.work_phone ?? null,
+      work_email: p.work_email ?? null,
+      personal_email: p.personal_email ?? null,
       job_title: jtMap[m.user_id] ?? null,
       avatar_url: p.avatar_url ?? null,
     };
@@ -60,4 +62,14 @@ export async function listWorkspacePeople(workspaceId) {
 export function personLabel(p) {
   if (!p) return 'Ẩn danh';
   return (p.full_name && p.full_name.trim()) || 'Chưa đặt tên';
+}
+
+// Email hiển thị ưu tiên work_email; fallback personal_email.
+// Trả null nếu không có cả 2.
+export function personEmail(p) {
+  if (!p) return null;
+  const work = (p.work_email || '').trim();
+  if (work) return work;
+  const personal = (p.personal_email || '').trim();
+  return personal || null;
 }
