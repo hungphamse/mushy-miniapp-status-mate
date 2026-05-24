@@ -6,9 +6,8 @@
 -- org chart. Owner workspace_id = origin (ws nơi tạo) — KHÔNG unshare
 -- origin được; chỉ ws non-origin unshare. Delete: owner only, soft.
 --
--- Thứ tự: tất cả CREATE TABLE trước (FK forward-ref OK với deferred FK
--- check), CREATE POLICY ở cuối (policy USING/WITH CHECK reference table
--- khác → phải đợi mọi table tồn tại trước).
+-- Thứ tự apply: định nghĩa bảng trước (FK forward-ref OK), policy ở cuối
+-- (policy USING/WITH CHECK reference bảng khác phải đợi bảng tồn tại).
 --
 -- Submit qua Admin Portal Migration Reviewer — auto-duplicate sang dev schema.
 -- =====================================================================
