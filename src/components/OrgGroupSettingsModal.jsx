@@ -153,12 +153,16 @@ function GroupRow({ group, onEdit, onChange }) {
       {group.description && <div style={{ fontSize: 13, marginTop: 4, color: 'var(--muted)' }}>{group.description}</div>}
 
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 10 }}>
-        <button className="mushy-btn mushy-btn--ghost" style={{ fontSize: 12, padding: '6px 10px' }} onClick={gen} disabled={busy}>
-          🔑 Gen mã share
-        </button>
-        <button className="mushy-btn mushy-btn--ghost" style={{ fontSize: 12, padding: '6px 10px' }} onClick={showWs}>
-          {wsList ? 'Ẩn workspace' : '👥 Workspace đã share'}
-        </button>
+        {isWsAdmin && (
+          <>
+            <button className="mushy-btn mushy-btn--ghost" style={{ fontSize: 12, padding: '6px 10px' }} onClick={gen} disabled={busy}>
+              🔑 Gen mã share
+            </button>
+            <button className="mushy-btn mushy-btn--ghost" style={{ fontSize: 12, padding: '6px 10px' }} onClick={showWs}>
+              {wsList ? 'Ẩn workspace' : '👥 Workspace đã share'}
+            </button>
+          </>
+        )}
         {isOwner && (
           <button className="mushy-btn mushy-btn--ghost" style={{ fontSize: 12, padding: '6px 10px' }} onClick={onEdit}>
             ✎ Sửa
