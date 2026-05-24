@@ -108,7 +108,7 @@ for all using (
 
 create or replace function app_org_chart.user_can_see_org_group(p_group_id uuid)
 returns boolean
-language sql stable security definer set search_path = app_org_chart, public as $$
+language sql stable security definer set search_path = app_org_chart as $$
   select exists (
     select 1 from app_org_chart.org_groups g
     where g.id = p_group_id
@@ -132,7 +132,7 @@ create or replace function app_org_chart.create_org_group(
   p_description text default null
 )
 returns app_org_chart.org_groups
-language plpgsql security definer set search_path = app_org_chart, public as $$
+language plpgsql security definer set search_path = app_org_chart as $$
 declare
   v_user uuid := auth.uid();
   v_slug text;
@@ -174,7 +174,7 @@ create or replace function app_org_chart.generate_org_group_share_code(
   p_expires_hours int default 24
 )
 returns app_org_chart.org_group_share_codes
-language plpgsql security definer set search_path = app_org_chart, public as $$
+language plpgsql security definer set search_path = app_org_chart as $$
 declare
   v_user uuid := auth.uid();
   v_code text;
@@ -219,7 +219,7 @@ create or replace function app_org_chart.redeem_org_group_share_code(
   p_target_ws_id uuid
 )
 returns app_org_chart.org_groups
-language plpgsql security definer set search_path = app_org_chart, public as $$
+language plpgsql security definer set search_path = app_org_chart as $$
 declare
   v_user uuid := auth.uid();
   v_sc app_org_chart.org_group_share_codes;
@@ -265,7 +265,7 @@ create or replace function app_org_chart.unshare_org_group_from_workspace(
   p_ws_id uuid
 )
 returns void
-language plpgsql security definer set search_path = app_org_chart, public as $$
+language plpgsql security definer set search_path = app_org_chart as $$
 declare
   v_user uuid := auth.uid();
   v_role text;
@@ -297,7 +297,7 @@ create or replace function app_org_chart.update_org_group(
   p_description text default null
 )
 returns app_org_chart.org_groups
-language plpgsql security definer set search_path = app_org_chart, public as $$
+language plpgsql security definer set search_path = app_org_chart as $$
 declare
   v_user uuid := auth.uid();
   v_row app_org_chart.org_groups;
@@ -324,7 +324,7 @@ create or replace function app_org_chart.delete_org_group_soft(
   p_confirm_slug text
 )
 returns void
-language plpgsql security definer set search_path = app_org_chart, public as $$
+language plpgsql security definer set search_path = app_org_chart as $$
 declare
   v_user uuid := auth.uid();
   v_group app_org_chart.org_groups;
