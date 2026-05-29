@@ -63,6 +63,14 @@ export const api = {
   decideMembership: (p_req, p_approve) =>
     call('decide_membership', { p_req, p_approve }),
   cancelMyRequest: (p_req) => call('cancel_my_request', { p_req }),
+  setMyStatus: (p_group_id, p_status, p_message, p_until) =>
+    call('set_my_status', {
+      p_group_id,
+      p_status,
+      p_message: p_message || null,
+      p_until: p_until || null,
+    }),
+  clearMyStatus: (p_group_id) => call('clear_my_status', { p_group_id }),
 };
 
 // slug từ tên: bỏ dấu, lowercase, gạch nối. Min 2 ký tự (regex squad.slug).

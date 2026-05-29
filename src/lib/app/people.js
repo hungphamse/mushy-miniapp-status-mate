@@ -101,8 +101,28 @@ export async function listGroupPeople(groupId) {
     }
   } catch { /* RPC chưa apply hoặc lỗi — skip */ }
 
+  // 5. Status-Mate (member_statuses) — optional, fallback nếu chưa apply mig.
+  const statusMap = {};
+  try {
+    const { data: statuses, error: sErr } = await db
+      .from('member_statuses')
+      .select('user_id, status, message, status_until, updated_at')
+      .eq('org_group_id', groupId);
+    if (!sErr) {
+      for (const s of statuses || []) {
+        statusMap[s.user_id] = {
+          status: s.status,
+          message: s.message,
+          status_until: s.status_until,
+          updated_at: s.updated_at,
+        };
+      }
+    }
+  } catch { /* ignore if table not available yet */ }
+
   return ids.map((uid) => {
     const p = pmap[uid] || {};
+    const st = statusMap[uid] || {};
     return {
       user_id: uid,
       ws_role: userRole.get(uid),
@@ -113,6 +133,10 @@ export async function listGroupPeople(groupId) {
       job_title: jtMap[uid] ?? null,
       avatar_url: p.avatar_url ?? null,
       companies: companiesMap[uid] || [],
+      status: st.status ?? null,
+      status_message: st.message ?? null,
+      status_until: st.status_until ?? null,
+      status_updated_at: st.updated_at ?? null,
     };
   });
 }

@@ -1,7 +1,11 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import DatePicker, { registerLocale } from 'react-datepicker';
+import vi from 'date-fns/locale/vi';
+import 'react-datepicker/dist/react-datepicker.css';
 import { getContext } from './lib/context.js';
 import { bridge } from './lib/bridge.js';
 import { subscribeToTable } from './lib/realtime.js';
+import { subscribeToStatus } from './lib/app/status-realtime.js';
 import { useDialog } from './components/Dialog.jsx';
 import Select from './components/Select.jsx';
 import MemberSearchSelect from './components/MemberSearchSelect.jsx';
@@ -16,7 +20,106 @@ import './App.css';
 
 const GROUP_REMEMBER_KEY = 'orgchart:last_group_id';
 
+registerLocale('vi', vi);
+
 const OTHER = '__other__';
+
+const STATUS_META = {
+  available: { label: 'Available', tone: 'ok' },
+  busy: { label: 'Busy', tone: 'warn' },
+  focus: { label: 'Focus', tone: 'err' },
+};
+
+const STATUS_DESCRIPTIONS = {
+  available: 'Có thể trao đổi',
+  busy: 'Phản hồi sau 30 phút',
+  focus: 'Chỉ ping nếu urgent',
+};
+
+const STATUS_FILTERS = [
+  { value: 'all', label: 'Tất cả' },
+  { value: 'available', label: 'Available' },
+  { value: 'busy', label: 'Busy' },
+  { value: 'focus', label: 'Focus' },
+];
+
+const STATUS_DURATION_OPTIONS = [
+  { value: 'none', label: 'Không giới hạn' },
+  { value: '30', label: '30 phút' },
+  { value: '45', label: '45 phút' },
+  { value: '60', label: '60 phút' },
+  { value: '90', label: '90 phút' },
+  { value: '120', label: '2 giờ' },
+  { value: '180', label: '3 giờ' },
+  { value: '300', label: '5 giờ' },
+  { value: '480', label: '8 giờ' },
+  { value: '720', label: '12 giờ' },
+  { value: '1440', label: '24 giờ' },
+  { value: 'custom', label: 'Chọn thời điểm kết thúc' },
+];
+
+function getStatusMeta(status) {
+  return STATUS_META[status] || STATUS_META.available;
+}
+
+function normalizeStatus(rawStatus, untilIso, nowMs) {
+  const untilMs = untilIso ? new Date(untilIso).getTime() : null;
+  const expired = untilMs != null && untilMs <= nowMs;
+  const status = !rawStatus || expired ? 'available' : rawStatus;
+  return { status, untilMs: expired ? null : untilMs, expired };
+}
+
+function formatRemaining(untilMs, nowMs) {
+  if (!untilMs || untilMs <= nowMs) return null;
+  const totalMin = Math.max(1, Math.ceil((untilMs - nowMs) / 60000));
+  if (totalMin < 60) return `Còn ${totalMin} phút`;
+  const hours = Math.floor(totalMin / 60);
+  const mins = totalMin % 60;
+  return mins ? `Còn ${hours} giờ ${mins} phút` : `Còn ${hours} giờ`;
+}
+
+function formatRemainingRounded(untilMs, nowMs) {
+  if (!untilMs || untilMs <= nowMs) return null;
+  const totalMin = Math.max(1, Math.ceil((untilMs - nowMs) / 60000));
+  const totalHours = Math.floor(totalMin / 60);
+  if (totalHours >= 24) {
+    const days = Math.floor(totalHours / 24);
+    return `Còn ${days} ngày`;
+  }
+  if (totalHours >= 1) return `Còn ${totalHours} giờ`;
+  return `Còn ${totalMin} phút`;
+}
+
+function statusMessage(status, message) {
+  return message || STATUS_DESCRIPTIONS[status] || '';
+}
+
+function toLocalInputValue(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  const pad = (n) => String(n).padStart(2, '0');
+  const yyyy = d.getFullYear();
+  const mm = pad(d.getMonth() + 1);
+  const dd = pad(d.getDate());
+  const hh = pad(d.getHours());
+  const min = pad(d.getMinutes());
+  return `${yyyy}-${mm}-${dd}T${hh}:${min}`;
+}
+
+function fromLocalInputValue(value) {
+  if (!value) return null;
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return null;
+  return d.toISOString();
+}
+
+function toDateFromLocalInput(value) {
+  if (!value) return null;
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return null;
+  return d;
+}
 
 export default function App() {
   const dialog = useDialog();
@@ -25,6 +128,15 @@ export default function App() {
   const [loading, setLoading] = useState(true);
   const [data, setData] = useState({ squads: [], members: [], positions: [], requests: [], events: [] });
   const [people, setPeople] = useState([]);
+  const [statusFilter, setStatusFilter] = useState('all');
+  const [nowTick, setNowTick] = useState(() => Date.now());
+  const [myStatus, setMyStatus] = useState('available');
+  const [myStatusMsg, setMyStatusMsg] = useState('');
+  const [myStatusDuration, setMyStatusDuration] = useState('none');
+  const [myStatusUntil, setMyStatusUntil] = useState('');
+  const [myStatusBusy, setMyStatusBusy] = useState(false);
+  const [myStatusDirty, setMyStatusDirty] = useState(false);
+  const [myStatusEditOpen, setMyStatusEditOpen] = useState(false);
   const [modal, setModal] = useState(null); // { kind, ... }
   // Org groups ws đang subscribe + group đang active.
   const [groups, setGroups] = useState(null);  // null = chưa load
@@ -44,6 +156,11 @@ export default function App() {
 
   useEffect(() => {
     try { setCtx(getContext()); } catch (e) { setCtxErr(e.message); }
+  }, []);
+
+  useEffect(() => {
+    const t = setInterval(() => setNowTick(Date.now()), 30000);
+    return () => clearInterval(t);
   }, []);
 
   const isAdmin = ctx && (ctx.role === 'owner' || ctx.role === 'admin');
@@ -73,6 +190,25 @@ export default function App() {
     }
   }, [activeGroupId]);
 
+  useEffect(() => {
+    setStatusFilter('all');
+    setMyStatusDirty(false);
+    setMyStatusEditOpen(false);
+  }, [activeGroupId]);
+
+  const reloadPeople = useCallback(async () => {
+    if (!activeGroupId) { setPeople([]); return []; }
+    try {
+      const ppl = await listGroupPeople(activeGroupId);
+      setPeople(ppl);
+      return ppl;
+    } catch (e) {
+      dialog.error('Không tải được danh sách thành viên', e?.message || String(e));
+      setPeople([]);
+      return [];
+    }
+  }, [activeGroupId, dialog]);
+
   const reload = useCallback(async () => {
     if (!activeGroupId) { setData({ squads: [], members: [], positions: [], requests: [], events: [] }); setPeople([]); setLoading(false); return; }
     setLoading(true);
@@ -83,8 +219,10 @@ export default function App() {
       ]);
       setData(oc);
       setPeople(ppl);
+      return { oc, ppl };
     } catch (e) {
       dialog.error('Không tải được org chart', e?.message || String(e));
+      return null;
     } finally {
       setLoading(false);
     }
@@ -109,11 +247,54 @@ export default function App() {
     return () => { clearTimeout(t); try { unsub(); } catch {} };
   }, [ctx, reload]);
 
+  useEffect(() => {
+    if (!activeGroupId) return;
+    let t;
+    let unsub = () => {};
+    try {
+      unsub = subscribeToStatus(activeGroupId, () => {
+        clearTimeout(t);
+        t = setTimeout(() => reloadPeople(), 250);
+      });
+    } catch { /* realtime không sẵn sàng — bỏ qua */ }
+    return () => { clearTimeout(t); try { unsub(); } catch {} };
+  }, [activeGroupId, reloadPeople]);
+
   const peopleMap = useMemo(
     () => Object.fromEntries(people.map((p) => [p.user_id, p])),
     [people],
   );
   const totals = useMemo(() => allocationTotals(data.members), [data.members]);
+  const statusByUser = useMemo(() => {
+    const nowMs = nowTick;
+    const map = {};
+    for (const p of people) {
+      const norm = normalizeStatus(p.status, p.status_until, nowMs);
+      map[p.user_id] = {
+        status: norm.status,
+        message: norm.expired ? null : (p.status_message || null),
+        untilMs: norm.untilMs,
+        updatedAt: p.status_updated_at || null,
+      };
+    }
+    return map;
+  }, [people, nowTick]);
+
+  useEffect(() => {
+    if (!ctx?.userId) return;
+    if (myStatusDirty) return;
+    const info = statusByUser[ctx.userId];
+    const status = info?.status || 'available';
+    setMyStatus(status);
+    setMyStatusMsg(info?.message || '');
+    if (info?.untilMs) {
+      setMyStatusDuration('custom');
+      setMyStatusUntil(toLocalInputValue(new Date(info.untilMs).toISOString()));
+    } else {
+      setMyStatusDuration('none');
+      setMyStatusUntil('');
+    }
+  }, [ctx?.userId, statusByUser, nowTick, myStatusDirty]);
 
   // Squad đã lưu trữ: CHỈ admin (owner/admin workspace) thấy. Member +
   // squad lead không thấy. Lọc hiển thị (squad_events/data vẫn đủ).
@@ -157,6 +338,53 @@ export default function App() {
 
   const myTotal = ctx ? (totals[ctx.userId] || 0) : 0;
   const myInAny = ctx && data.members.some((r) => r.user_id === ctx.userId);
+  const myStatusInfo = ctx ? (statusByUser[ctx.userId] || { status: 'available' }) : { status: 'available' };
+  const myStatusRemain = formatRemainingRounded(myStatusInfo.untilMs, nowTick);
+  const myStatusDesc = STATUS_DESCRIPTIONS[myStatusInfo.status] || '';
+  const myStatusText = myStatusInfo.message || '';
+
+  const saveMyStatus = useCallback(async () => {
+    if (!activeGroupId) return;
+    let until = null;
+    if (myStatusDuration === 'custom') {
+      until = fromLocalInputValue(myStatusUntil);
+    } else if (myStatusDuration !== 'none') {
+      const min = parseInt(myStatusDuration, 10);
+      if (Number.isFinite(min) && min > 0) {
+        until = new Date(Date.now() + min * 60000).toISOString();
+      }
+    }
+    setMyStatusBusy(true);
+    try {
+      await api.setMyStatus(activeGroupId, myStatus, myStatusMsg.trim() || null, until);
+      setMyStatusDirty(false);
+      setMyStatusEditOpen(false);
+      await reloadPeople();
+    } catch (e) {
+      dialog.error('Không cập nhật được trạng thái', e?.message || String(e));
+    } finally {
+      setMyStatusBusy(false);
+    }
+  }, [activeGroupId, myStatus, myStatusMsg, myStatusDuration, myStatusUntil, dialog, reloadPeople]);
+
+  const clearMyStatus = useCallback(async () => {
+    if (!activeGroupId) return;
+    setMyStatusBusy(true);
+    try {
+      await api.clearMyStatus(activeGroupId);
+      setMyStatusDirty(false);
+      setMyStatus('available');
+      setMyStatusMsg('');
+      setMyStatusDuration('none');
+      setMyStatusUntil('');
+      setMyStatusEditOpen(false);
+      await reloadPeople();
+    } catch (e) {
+      dialog.error('Không xoá được trạng thái', e?.message || String(e));
+    } finally {
+      setMyStatusBusy(false);
+    }
+  }, [activeGroupId, dialog, reloadPeople]);
 
   if (ctxErr) {
     return <div className="mushy-page"><div className="mushy-card">
@@ -232,6 +460,64 @@ export default function App() {
         </div>
       )}
 
+      {activeGroupId && (
+        <MyStatusCard
+          currentStatus={myStatusInfo.status}
+          currentDesc={myStatusDesc}
+          currentText={myStatusText}
+          remaining={myStatusRemain}
+          editStatus={myStatus}
+          editMsg={myStatusMsg}
+          editDuration={myStatusDuration}
+          editUntil={myStatusUntil}
+          busy={myStatusBusy}
+          editOpen={myStatusEditOpen}
+          onEditOpen={() => setMyStatusEditOpen(true)}
+          onEditClose={() => setMyStatusEditOpen(false)}
+          onStatusSelect={(value) => {
+            setMyStatusDirty(true);
+            setMyStatus(value);
+          }}
+          onMsgChange={(value) => { setMyStatusDirty(true); setMyStatusMsg(value); }}
+          onDurationChange={(value) => {
+            setMyStatusDirty(true);
+            setMyStatusDuration(value);
+            if (value === 'custom') {
+              const iso = new Date(Date.now() + 30 * 60000).toISOString();
+              setMyStatusUntil(toLocalInputValue(iso));
+            } else {
+              setMyStatusUntil('');
+            }
+          }}
+          onUntilChange={(value) => { setMyStatusDirty(true); setMyStatusUntil(value); }}
+          onSave={saveMyStatus}
+          onClear={clearMyStatus}
+        />
+      )}
+
+      <div className="oc-filter-bar">
+        <span className="oc-filter-label">Lọc theo trạng thái</span>
+        <div className="oc-filter-chips">
+          {STATUS_FILTERS.map((f) => (
+            <button
+              key={f.value}
+              className={`oc-filter-chip ${statusFilter === f.value ? 'is-active' : ''}`}
+              onClick={() => setStatusFilter(f.value)}
+            >
+              {f.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="oc-status-callout">
+        <div className="oc-status-callout-title">Status-Mate là gì?</div>
+        <div className="oc-status-callout-body">
+          Tính năng giúp đội nhóm cập nhật trạng thái làm việc theo thời gian thực,
+          kết nối đúng lúc và tôn trọng sự tập trung của nhau.
+        </div>
+      </div>
+
       {isAdmin && (
         <div className="oc-admin-bar">
           <button className="mushy-btn mushy-btn--primary"
@@ -271,6 +557,7 @@ export default function App() {
                 ctx={ctx} isAdmin={isAdmin} setModal={setModal}
                 reload={reload} dialog={dialog}
                 openMap={openMap} toggleOpen={toggleOpen}
+                statusByUser={statusByUser} statusFilter={statusFilter} nowTick={nowTick}
               />
             ))}
           </div>
@@ -281,6 +568,45 @@ export default function App() {
         <ActivityFeed events={data.events} peopleMap={peopleMap} squads={visibleSquads} />
       )}
 
+      <div className="oc-status-legend">
+        <div className="oc-section-title">Bảng trạng thái</div>
+        <div className="oc-legend-items">
+          <div className="oc-legend-item">
+            <span className="oc-status-pill oc-status-pill--available"><span className="oc-status-dot" />Available</span>
+            <span className="oc-legend-text">Có thể trao đổi (sẵn sàng phản hồi)</span>
+          </div>
+          <div className="oc-legend-item">
+            <span className="oc-status-pill oc-status-pill--busy"><span className="oc-status-dot" />Busy</span>
+            <span className="oc-legend-text">Bận việc, có thể phản hồi sau</span>
+          </div>
+          <div className="oc-legend-item">
+            <span className="oc-status-pill oc-status-pill--focus"><span className="oc-status-dot" />Focus</span>
+            <span className="oc-legend-text">Đang tập trung, chỉ ping nếu cần thiết</span>
+          </div>
+        </div>
+      </div>
+
+      <div className="oc-status-benefits">
+        <div className="oc-section-title">Lợi ích của Status-Mate</div>
+        <div className="oc-benefit-grid">
+          <div className="oc-benefit-card">
+            <div className="oc-benefit-icon">🎯</div>
+            <div className="oc-benefit-title">Kết nối đúng lúc</div>
+            <div className="oc-benefit-text">Biết ai đang rảnh để trao đổi nhanh chóng, hiệu quả.</div>
+          </div>
+          <div className="oc-benefit-card">
+            <div className="oc-benefit-icon">🧠</div>
+            <div className="oc-benefit-title">Tôn trọng sự tập trung</div>
+            <div className="oc-benefit-text">Giảm làm phiền, để mọi người duy trì trạng thái deep work.</div>
+          </div>
+          <div className="oc-benefit-card">
+            <div className="oc-benefit-icon">🔎</div>
+            <div className="oc-benefit-title">Minh bạch & chủ động</div>
+            <div className="oc-benefit-text">Mỗi thành viên chủ động cập nhật, phối hợp mượt mà hơn.</div>
+          </div>
+        </div>
+      </div>
+
       <footer className="oc-footer">Mushy · org-chart</footer>
 
       {modal && (
@@ -289,6 +615,7 @@ export default function App() {
           ctx={ctx} activeGroupId={activeGroupId} data={data} people={people}
           positionOptions={positionOptions} wsMemberOptions={wsMemberOptions}
           dialog={dialog} reload={reload}
+          statusByUser={statusByUser} nowTick={nowTick}
         />
       )}
 
@@ -302,23 +629,125 @@ export default function App() {
   );
 }
 
+function MyStatusCard({
+  currentStatus, currentDesc, currentText, remaining,
+  editStatus, editMsg, editDuration, editUntil,
+  onStatusSelect, onMsgChange, onDurationChange, onUntilChange,
+  onSave, onClear, busy,
+  editOpen, onEditOpen, onEditClose,
+}) {
+  const meta = getStatusMeta(currentStatus);
+  return (
+    <div className="oc-status-card">
+      <div className="oc-status-card-head">
+        <div>
+          <div className="oc-status-title">Trạng thái của tôi</div>
+          <div className="oc-status-current">
+            <span className={`oc-status-pill oc-status-pill--${currentStatus}`}>
+              <span className="oc-status-dot" />{meta.label}
+            </span>
+            {remaining && <span className="oc-status-remaining">{remaining}</span>}
+          </div>
+          {currentDesc && <div className="oc-status-desc">{currentDesc}</div>}
+          {currentText && <div className="oc-status-current-msg">{currentText}</div>}
+        </div>
+        <button className="oc-status-edit-btn" onClick={editOpen ? onEditClose : onEditOpen}>
+          {editOpen ? 'Đóng chỉnh sửa' : 'Chỉnh sửa'}
+        </button>
+      </div>
+
+      {editOpen && (
+        <div className="oc-status-editor">
+          <div className="oc-status-choices">
+            {['available', 'busy', 'focus'].map((s) => {
+              const m = getStatusMeta(s);
+              return (
+                <button
+                  key={s}
+                  className={`oc-status-chip oc-status-chip--${s} ${editStatus === s ? 'is-active' : ''}`}
+                  onClick={() => onStatusSelect(s)}
+                >
+                  <span className="oc-status-dot" />{m.label}
+                </button>
+              );
+            })}
+          </div>
+          <div className="oc-status-desc">
+            {STATUS_DESCRIPTIONS[editStatus] || ''}
+          </div>
+
+          <label className="oc-label">Tin nhắn (tuỳ chọn)</label>
+          <textarea
+            className="mushy-input oc-textarea"
+            value={editMsg}
+            maxLength={200}
+            onChange={(e) => onMsgChange(e.target.value)}
+            placeholder="VD: Đang deep work, ping nếu urgent"
+          />
+
+          <label className="oc-label">Thời lượng</label>
+          <div className="oc-duration-row">
+            <Select
+              value={editDuration}
+              onChange={onDurationChange}
+              options={STATUS_DURATION_OPTIONS}
+              placeholder="Chọn thời lượng"
+            />
+            {editDuration === 'custom' && (
+              <DatePicker
+                selected={toDateFromLocalInput(editUntil)}
+                onChange={(date) => onUntilChange(date ? toLocalInputValue(date.toISOString()) : '')}
+                showTimeSelect
+                timeIntervals={15}
+                dateFormat="Pp"
+                timeCaption="Giờ"
+                locale="vi"
+                placeholderText="Chọn thời điểm kết thúc"
+                className="mushy-input oc-datepicker"
+              />
+            )}
+          </div>
+
+          <div className="oc-status-actions">
+            <button className="mushy-btn mushy-btn--primary" onClick={onSave} disabled={busy}>
+              {busy ? 'Đang lưu…' : 'Cập nhật'}
+            </button>
+            <button className="mushy-btn mushy-btn--ghost" onClick={onClear} disabled={busy}>
+              Xoá trạng thái
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ---------------- Squad node (đệ quy, collapsible) ----------------
 function SquadNode({ squad, depth, childrenOf, membersOf, peopleMap, totals,
   requestsBySquad, myPending, ctx, isAdmin, setModal, reload, dialog,
-  openMap, toggleOpen }) {
+  openMap, toggleOpen, statusByUser, statusFilter, nowTick }) {
   const open = !!openMap[squad.id];
   const [busy, setBusy] = useState(false);
   const kids = childrenOf[squad.id] || [];
-  const mem = (membersOf[squad.id] || []).slice().sort((a, b) => {
+  const memAll = (membersOf[squad.id] || []).slice().sort((a, b) => {
     if (a.kind !== b.kind) return a.kind === 'lead' ? -1 : 1;
     return 0;
   });
+  const mem = statusFilter === 'all'
+    ? memAll
+    : memAll.filter((r) => (statusByUser[r.user_id]?.status || 'available') === statusFilter);
   const archived = squad.status === 'archived';
   const isLead = squad.lead_user_id === ctx.userId;
   const canManage = isAdmin || isLead;
-  const myActive = mem.some((r) => r.user_id === ctx.userId);
+  const myActive = memAll.some((r) => r.user_id === ctx.userId);
   const myReq = myPending[squad.id];                       // pending của tôi (nếu có)
   const pend = requestsBySquad[squad.id] || [];            // mọi pending của squad
+
+  const statusCounts = memAll.reduce((acc, r) => {
+    const st = statusByUser[r.user_id]?.status || 'available';
+    acc[st] = (acc[st] || 0) + 1;
+    return acc;
+  }, { available: 0, busy: 0, focus: 0 });
 
   // Chạy RPC + reload, báo lỗi qua dialog. Không đóng gì (inline).
   const act = async (fn) => {
@@ -350,11 +779,24 @@ function SquadNode({ squad, depth, childrenOf, membersOf, peopleMap, totals,
             <div className="oc-squad-title">
               {squad.name}
               {archived && <span className="oc-tag oc-tag--muted">đã lưu trữ</span>}
-              {!open && (mem.length > 0 || kids.length > 0) && (
+              {!open && (memAll.length > 0 || kids.length > 0) && (
                 <span className="oc-squad-counts">
-                  {mem.length > 0 && <span>{mem.length} người</span>}
-                  {mem.length > 0 && kids.length > 0 && <span> · </span>}
+                  {memAll.length > 0 && <span>{memAll.length} người</span>}
+                  {memAll.length > 0 && kids.length > 0 && <span> · </span>}
                   {kids.length > 0 && <span>{kids.length} squad con</span>}
+                  {memAll.length > 0 && (
+                    <span className="oc-status-counts">
+                      <span className="oc-status-count oc-status-count--available">
+                        <span className="oc-status-dot" />{statusCounts.available}
+                      </span>
+                      <span className="oc-status-count oc-status-count--busy">
+                        <span className="oc-status-dot" />{statusCounts.busy}
+                      </span>
+                      <span className="oc-status-count oc-status-count--focus">
+                        <span className="oc-status-dot" />{statusCounts.focus}
+                      </span>
+                    </span>
+                  )}
                 </span>
               )}
             </div>
@@ -368,10 +810,19 @@ function SquadNode({ squad, depth, childrenOf, membersOf, peopleMap, totals,
 
         {open && (
           <div className="oc-members">
-            {mem.length === 0 && <div className="oc-empty-mem">Chưa có thành viên</div>}
+            {mem.length === 0 && (
+              <div className="oc-empty-mem">
+                {memAll.length === 0 ? 'Chưa có thành viên' : 'Không có thành viên khớp trạng thái'}
+              </div>
+            )}
             {mem.map((r) => {
               const p = peopleMap[r.user_id];
               const st = allocStatus(totals[r.user_id] || 0);
+              const statusInfo = statusByUser[r.user_id] || { status: 'available', message: null, untilMs: null };
+              const statusMeta = getStatusMeta(statusInfo.status);
+              const statusDesc = STATUS_DESCRIPTIONS[statusInfo.status] || '';
+              const statusText = statusInfo.message || statusDesc;
+              const remain = formatRemaining(statusInfo.untilMs, nowTick);
               const mine = r.user_id === ctx.userId;
               return (
                 <div key={r.id} className="oc-mem">
@@ -388,6 +839,14 @@ function SquadNode({ squad, depth, childrenOf, membersOf, peopleMap, totals,
                     </span>
                     <span className="oc-mem-sub">
                       {r.position}{p?.job_title ? ` · ${p.job_title}` : ''}
+                    </span>
+                    <span className="oc-mem-status">
+                      <span className={`oc-status-pill oc-status-pill--${statusInfo.status}`}>
+                        <span className="oc-status-dot" />{statusMeta.label}
+                      </span>
+                      <span className="oc-status-msg">
+                        {statusText}{remain ? ` · ${remain}` : ''}
+                      </span>
                     </span>
                   </button>
                   <span className={`oc-alloc oc-alloc--${st}`} title={`Tổng mọi squad: ${totals[r.user_id] || 0}%`}>
@@ -481,14 +940,15 @@ function SquadNode({ squad, depth, childrenOf, membersOf, peopleMap, totals,
           requestsBySquad={requestsBySquad} myPending={myPending}
           ctx={ctx} isAdmin={isAdmin} setModal={setModal}
           reload={reload} dialog={dialog}
-          openMap={openMap} toggleOpen={toggleOpen} />
+          openMap={openMap} toggleOpen={toggleOpen}
+          statusByUser={statusByUser} statusFilter={statusFilter} nowTick={nowTick} />
       ))}
     </div>
   );
 }
 
 // ---------------- Modal host ----------------
-function ModalHost({ modal, setModal, close, ctx, activeGroupId, data, people, positionOptions, wsMemberOptions, dialog, reload }) {
+function ModalHost({ modal, setModal, close, ctx, activeGroupId, data, people, positionOptions, wsMemberOptions, dialog, reload, statusByUser, nowTick }) {
   const run = async (fn, okMsg) => {
     try {
       await fn();
@@ -569,7 +1029,7 @@ function ModalHost({ modal, setModal, close, ctx, activeGroupId, data, people, p
       run={run} close={close} />;
   }
   if (modal.kind === 'person') {
-    return <PersonActions person={modal.person} close={close} dialog={dialog} />;
+    return <PersonActions person={modal.person} close={close} dialog={dialog} statusByUser={statusByUser} nowTick={nowTick} />;
   }
   return null;
 }
@@ -878,12 +1338,34 @@ function RequestJoin({ squad, positionOptions, run, close }) {
 
 // Ấn vào tên người → hành động liên hệ. Hiện: gọi điện (SĐT công việc đã
 // lưu). Tương lai: email, chat duhat… (đang để disabled "sắp có").
-function PersonActions({ person, close, dialog }) {
+function PersonActions({ person, close, dialog, statusByUser, nowTick }) {
   const phone = person?.work_phone && person.work_phone.trim();
+  const info = statusByUser?.[person?.user_id] || { status: 'available', message: null, untilMs: null };
+  const meta = getStatusMeta(info.status);
+  const remain = formatRemaining(info.untilMs, nowTick);
+  const msg = statusMessage(info.status, info.message);
+  const copyText = msg ? `${meta.label}: ${msg}${remain ? ` (${remain})` : ''}` : meta.label;
+
+  async function copyStatus() {
+    try {
+      await navigator.clipboard.writeText(copyText);
+      dialog.success('Đã copy', 'Status message đã được sao chép.');
+    } catch (e) {
+      dialog.error('Không copy được', e?.message || String(e));
+    }
+  }
   return (
     <Scrim close={close}>
       <h3 className="dialog-title">{personLabel(person)}</h3>
       {person?.job_title && <p className="mushy-section-sub">{person.job_title}</p>}
+
+      <div className="oc-person-status">
+        <span className={`oc-status-pill oc-status-pill--${info.status}`}>
+          <span className="oc-status-dot" />{meta.label}
+        </span>
+        {msg && <div className="oc-status-current-msg">{msg}</div>}
+        {remain && <div className="oc-status-remaining">{remain}</div>}
+      </div>
 
       <button className="mushy-btn mushy-btn--primary mushy-btn--block"
         disabled={!phone}
@@ -893,6 +1375,10 @@ function PersonActions({ person, close, dialog }) {
           close();
         }}>
         📞 {phone ? `Gọi ${formatVNPhone(phone)}` : 'Chưa có số điện thoại'}
+      </button>
+
+      <button className="mushy-btn mushy-btn--ghost mushy-btn--block" onClick={copyStatus}>
+        📋 Copy status message
       </button>
 
       <button className="mushy-btn mushy-btn--ghost mushy-btn--block" disabled>

@@ -11,3 +11,9 @@ dist
 # Logs
 *.log
 npm-debug.log*
+
+# Prompts
+.github/prompts
+
+# Temp
+*temp*
