@@ -19,7 +19,7 @@
 -- Detect "ws có data" = ws đã tiến hành init (positions seeded hoặc có squad).
 -- Skip ws đã có org_group với workspace_id = chính ws đó (đã backfill lần trước).
 
-insert into app_org_chart.org_groups
+insert into app_status_mate.org_groups
   (workspace_id, name, slug, description, owner_user_id, created_by)
 select
   w.id as workspace_id,
@@ -33,40 +33,40 @@ select
   -- trong ws. Nếu cả 2 thiếu → bỏ qua ws này (không tạo group).
   coalesce(
     w.created_by,
-    (select created_by from app_org_chart.squads where workspace_id = w.id limit 1)
+    (select created_by from app_status_mate.squads where workspace_id = w.id limit 1)
   ) as owner_user_id,
   coalesce(
     w.created_by,
-    (select created_by from app_org_chart.squads where workspace_id = w.id limit 1)
+    (select created_by from app_status_mate.squads where workspace_id = w.id limit 1)
   ) as created_by
 from public.workspaces w
 where w.deleted_at is null
   and (
-    exists (select 1 from app_org_chart.squads where workspace_id = w.id)
-    or exists (select 1 from app_org_chart.positions where workspace_id = w.id)
-    or exists (select 1 from app_org_chart.squad_members where workspace_id = w.id)
+    exists (select 1 from app_status_mate.squads where workspace_id = w.id)
+    or exists (select 1 from app_status_mate.positions where workspace_id = w.id)
+    or exists (select 1 from app_status_mate.squad_members where workspace_id = w.id)
   )
   -- Skip ws đã có org_group origin = w.id (idempotent).
   and not exists (
-    select 1 from app_org_chart.org_groups where workspace_id = w.id
+    select 1 from app_status_mate.org_groups where workspace_id = w.id
   )
   -- Skip ws không có owner (không xác định được).
   and coalesce(
     w.created_by,
-    (select created_by from app_org_chart.squads where workspace_id = w.id limit 1)
+    (select created_by from app_status_mate.squads where workspace_id = w.id limit 1)
   ) is not null;
 
 -- ---------- 2. Auto-share org_group với ws origin ----------
-insert into app_org_chart.org_group_workspaces
+insert into app_status_mate.org_group_workspaces
   (workspace_id, org_group_id, added_by, created_by)
 select
   g.workspace_id,
   g.id as org_group_id,
   g.owner_user_id as added_by,
   g.owner_user_id as created_by
-from app_org_chart.org_groups g
+from app_status_mate.org_groups g
 where not exists (
-  select 1 from app_org_chart.org_group_workspaces
+  select 1 from app_status_mate.org_group_workspaces
   where org_group_id = g.id and workspace_id = g.workspace_id
 );
 
@@ -75,33 +75,33 @@ where not exists (
 -- per ws). Nếu ws không có group (không được tạo do thiếu owner) → row giữ
 -- org_group_id NULL. Mig 007 RPC sẽ raise nếu encounter NULL.
 
-update app_org_chart.squads s
+update app_status_mate.squads s
 set org_group_id = g.id
-from app_org_chart.org_groups g
+from app_status_mate.org_groups g
 where s.workspace_id = g.workspace_id
   and s.org_group_id is null;
 
-update app_org_chart.positions p
+update app_status_mate.positions p
 set org_group_id = g.id
-from app_org_chart.org_groups g
+from app_status_mate.org_groups g
 where p.workspace_id = g.workspace_id
   and p.org_group_id is null;
 
-update app_org_chart.squad_members sm
+update app_status_mate.squad_members sm
 set org_group_id = g.id
-from app_org_chart.org_groups g
+from app_status_mate.org_groups g
 where sm.workspace_id = g.workspace_id
   and sm.org_group_id is null;
 
-update app_org_chart.membership_requests mr
+update app_status_mate.membership_requests mr
 set org_group_id = g.id
-from app_org_chart.org_groups g
+from app_status_mate.org_groups g
 where mr.workspace_id = g.workspace_id
   and mr.org_group_id is null;
 
-update app_org_chart.squad_events se
+update app_status_mate.squad_events se
 set org_group_id = g.id
-from app_org_chart.org_groups g
+from app_status_mate.org_groups g
 where se.workspace_id = g.workspace_id
   and se.org_group_id is null;
 
@@ -114,10 +114,10 @@ declare
   v_positions_orphan int;
   v_members_orphan int;
 begin
-  select count(*) into v_groups_count from app_org_chart.org_groups;
-  select count(*) into v_squads_orphan from app_org_chart.squads where org_group_id is null;
-  select count(*) into v_positions_orphan from app_org_chart.positions where org_group_id is null;
-  select count(*) into v_members_orphan from app_org_chart.squad_members where org_group_id is null;
+  select count(*) into v_groups_count from app_status_mate.org_groups;
+  select count(*) into v_squads_orphan from app_status_mate.squads where org_group_id is null;
+  select count(*) into v_positions_orphan from app_status_mate.positions where org_group_id is null;
+  select count(*) into v_members_orphan from app_status_mate.squad_members where org_group_id is null;
   raise notice 'mig 006 backfill: % org_groups created. Orphan rows (org_group_id NULL): squads=%, positions=%, members=%.',
     v_groups_count, v_squads_orphan, v_positions_orphan, v_members_orphan;
 end $$;

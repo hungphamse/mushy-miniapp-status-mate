@@ -74,7 +74,7 @@ export async function listGroupPeople(groupId) {
   const pmap = Object.fromEntries((profiles || []).map((p) => [p.user_id, p]));
 
   // 4. job_title per-company + companies user thuộc (logo).
-  // Dùng RPC app_org_chart.get_users_companies (mig 009 SECURITY DEFINER)
+  // Dùng RPC app_status_mate.get_users_companies (mig 009 SECURITY DEFINER)
   // để bypass RLS public.company_members — RLS chỉ cho user thấy member
   // cùng company → follower ws (user khác company) trả empty → không logo.
   // RPC expose company info công khai (id, name, logo_url, job_title) cho

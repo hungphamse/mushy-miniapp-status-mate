@@ -17,29 +17,29 @@
 -- =====================================================================
 
 -- ---------- squads ----------
-alter table app_org_chart.squads
-  add column if not exists org_group_id uuid references app_org_chart.org_groups(id) on delete cascade;
-create index if not exists idx_squads_group on app_org_chart.squads (org_group_id);
+alter table app_status_mate.squads
+  add column if not exists org_group_id uuid references app_status_mate.org_groups(id) on delete cascade;
+create index if not exists idx_squads_group on app_status_mate.squads (org_group_id);
 
 -- ---------- positions ----------
-alter table app_org_chart.positions
-  add column if not exists org_group_id uuid references app_org_chart.org_groups(id) on delete cascade;
-create index if not exists idx_positions_group on app_org_chart.positions (org_group_id);
+alter table app_status_mate.positions
+  add column if not exists org_group_id uuid references app_status_mate.org_groups(id) on delete cascade;
+create index if not exists idx_positions_group on app_status_mate.positions (org_group_id);
 
 -- ---------- squad_members ----------
-alter table app_org_chart.squad_members
-  add column if not exists org_group_id uuid references app_org_chart.org_groups(id) on delete cascade;
-create index if not exists idx_sm_group on app_org_chart.squad_members (org_group_id);
+alter table app_status_mate.squad_members
+  add column if not exists org_group_id uuid references app_status_mate.org_groups(id) on delete cascade;
+create index if not exists idx_sm_group on app_status_mate.squad_members (org_group_id);
 
 -- ---------- membership_requests ----------
-alter table app_org_chart.membership_requests
-  add column if not exists org_group_id uuid references app_org_chart.org_groups(id) on delete cascade;
-create index if not exists idx_mr_group on app_org_chart.membership_requests (org_group_id);
+alter table app_status_mate.membership_requests
+  add column if not exists org_group_id uuid references app_status_mate.org_groups(id) on delete cascade;
+create index if not exists idx_mr_group on app_status_mate.membership_requests (org_group_id);
 
 -- ---------- squad_events ----------
-alter table app_org_chart.squad_events
-  add column if not exists org_group_id uuid references app_org_chart.org_groups(id) on delete cascade;
-create index if not exists idx_se_group on app_org_chart.squad_events (org_group_id);
+alter table app_status_mate.squad_events
+  add column if not exists org_group_id uuid references app_status_mate.org_groups(id) on delete cascade;
+create index if not exists idx_se_group on app_status_mate.squad_events (org_group_id);
 
 -- KHÔNG đụng RLS / RPC trong mig này — code app vẫn dùng workspace_id.
 -- Mig 006 (backfill) + mig 007 (rewrite RPCs) sẽ switch sang group-based.

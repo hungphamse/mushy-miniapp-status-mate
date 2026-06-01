@@ -121,6 +121,27 @@ function toDateFromLocalInput(value) {
   return d;
 }
 
+function parseJwtPayload(token) {
+  if (!token || typeof token !== 'string') return null;
+  const parts = token.split('.');
+  if (parts.length < 2) return null;
+  try {
+    const base64Url = parts[1];
+    const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
+    const padded = base64.padEnd(Math.ceil(base64.length / 4) * 4, '=');
+    return JSON.parse(atob(padded));
+  } catch {
+    return null;
+  }
+}
+
+function isExpiredJwt(token, nowMs = Date.now()) {
+  const payload = parseJwtPayload(token);
+  const exp = Number(payload?.exp);
+  if (!Number.isFinite(exp)) return false;
+  return exp * 1000 <= nowMs;
+}
+
 export default function App() {
   const dialog = useDialog();
   const [ctx, setCtx] = useState(null);
@@ -155,7 +176,16 @@ export default function App() {
   const collapseAll = useCallback(() => setOpenMap({}), []);
 
   useEffect(() => {
-    try { setCtx(getContext()); } catch (e) { setCtxErr(e.message); }
+    try {
+      const nextCtx = getContext();
+      if (import.meta.env.DEV && nextCtx?.token && isExpiredJwt(nextCtx.token)) {
+        setCtxErr('VITE_DEV_TOKEN đã hết hạn. Chạy `npm run dev:token` để đăng nhập lại rồi reload trang.');
+        return;
+      }
+      setCtx(nextCtx);
+    } catch (e) {
+      setCtxErr(e.message);
+    }
   }, []);
 
   useEffect(() => {
