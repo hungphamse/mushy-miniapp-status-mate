@@ -17,6 +17,7 @@ import {
   describeEvent, timeAgo, formatVNPhone,
 } from './lib/app/api.js';
 import './App.css';
+import { log } from './logger.js';
 
 const GROUP_REMEMBER_KEY = 'orgchart:last_group_id';
 
@@ -177,7 +178,12 @@ export default function App() {
 
   useEffect(() => {
     try {
-      const nextCtx = getContext();
+        const nextCtx = getContext();
+        log.info('ENV: ', import.meta.env.DEV ? 'development' : 'production');
+        log.info('Context: ', nextCtx ? 'loaded' : 'null');
+        if (nextCtx?.token) {
+        	log.info('Validate until: ', parseJwtPayload(nextCtx.token)?.exp ? new Date(parseJwtPayload(nextCtx.token).exp * 1000) : 'invalid token');
+        }
       if (import.meta.env.DEV && nextCtx?.token && isExpiredJwt(nextCtx.token)) {
         setCtxErr('VITE_DEV_TOKEN đã hết hạn. Chạy `npm run dev:token` để đăng nhập lại rồi reload trang.');
         return;

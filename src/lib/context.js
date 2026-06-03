@@ -6,7 +6,7 @@ export function getContext() {
   if (typeof window !== 'undefined' && window.__APP_CONTEXT__) {
     return window.__APP_CONTEXT__;
   }
-  if (import.meta.env.DEV) {
+  if (import.meta.env.VITE_DEV_TOKEN) {
     return {
       token:       import.meta.env.VITE_DEV_TOKEN,
       workspaceId: import.meta.env.VITE_DEV_WORKSPACE_ID,
