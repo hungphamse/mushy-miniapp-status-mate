@@ -17,7 +17,7 @@ import {
   describeEvent, timeAgo, formatVNPhone,
 } from './lib/app/api.js';
 import './App.css';
-import { log } from './logger.js';
+import { log } from './lib/app/logger.js';
 
 const GROUP_REMEMBER_KEY = 'orgchart:last_group_id';
 
