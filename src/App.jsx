@@ -264,7 +264,15 @@ export default function App() {
     }
   }, [activeGroupId, dialog]);
 
-  useEffect(() => { if (activeGroupId) reload(); }, [activeGroupId, reload]);
+  useEffect(() => {
+    if (activeGroupId) {
+      reload();
+    } else if (groups !== null) {
+      // Groups have loaded but none is active (empty workspace) — nothing to
+      // fetch, so clear the loading state that was set on mount.
+      setLoading(false);
+    }
+  }, [activeGroupId, groups, reload]);
 
   // Realtime subscribe theo workspace_id (PostgREST realtime filter chỉ
   // support eq trên column thật). Ta vẫn subscribe theo ctx.workspaceId
