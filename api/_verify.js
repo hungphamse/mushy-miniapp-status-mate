@@ -21,15 +21,25 @@ import { createClient } from '@supabase/supabase-js';
 // JSON import attribute — Vercel bundler traces ESM imports, đảm bảo
 // mushy.config.json được include vào deployment. Node 20.10+/22 hỗ trợ `with`.
 import config from '../mushy.config.json' with { type: 'json' };
+import { makeLogger } from './_logger.js';
 
 const SUPABASE_URL = config.supabase.url;
 const ANON_KEY = config.supabase.anonKey;
 
 export async function verifyRequest(req) {
+  const log = makeLogger(req);
+
   const auth = req.headers.authorization || '';
   const token = auth.startsWith('Bearer ') ? auth.slice(7) : null;
   const workspaceId = req.headers['x-workspace-id'];
-  if (!token || !workspaceId) return null;
+
+  if (!token || !workspaceId) {
+    log.warn('verify failed: missing token or workspaceId', {
+      hasToken: !!token,
+      hasWorkspaceId: !!workspaceId,
+    });
+    return null;
+  }
 
   const client = createClient(SUPABASE_URL, ANON_KEY, {
     global: { headers: { Authorization: `Bearer ${token}` } },
@@ -37,7 +47,10 @@ export async function verifyRequest(req) {
   });
 
   const { data: u, error } = await client.auth.getUser(token);
-  if (error || !u?.user) return null;
+  if (error || !u?.user) {
+    log.warn('verify failed: invalid JWT', { supabaseError: error?.message ?? null });
+    return null;
+  }
 
   const { data: member } = await client
     .from('workspace_members')
@@ -45,7 +58,15 @@ export async function verifyRequest(req) {
     .eq('workspace_id', workspaceId)
     .eq('user_id', u.user.id)
     .maybeSingle();
-  if (!member) return null;
 
+  if (!member) {
+    log.warn('verify failed: not a workspace member', {
+      userId: u.user.id,
+      workspaceId,
+    });
+    return null;
+  }
+
+  log.info('verify ok', { userId: u.user.id, workspaceId, role: member.role });
   return { userId: u.user.id, workspaceId, role: member.role, token };
 }

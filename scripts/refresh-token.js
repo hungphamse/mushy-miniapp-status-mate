@@ -54,9 +54,9 @@ if (!/^\d{6}$/.test(token)) { console.error('❌ Mã OTP phải đúng 6 chữ s
 const { data, error } = await sb.auth.verifyOtp({ email, token, type: 'email' });
 if (error) { console.error('❌', error.message); process.exit(1); }
 
-const lines = existsSync(envPath) ? readFileSync(envPath, 'utf8').split('\n') : [];
+const lines = existsSync(envPath) ? readFileSync(envPath, 'utf8').split(/\r?\n/) : [];
 const out = lines.map((l) =>
-  l.startsWith('VITE_DEV_TOKEN=') ? `VITE_DEV_TOKEN=${data.session.access_token}` : l
+  l.trim().startsWith('VITE_DEV_TOKEN=') ? `VITE_DEV_TOKEN=${data.session.access_token}` : l.trimEnd()
 );
 if (!out.some((l) => l.startsWith('VITE_DEV_TOKEN='))) {
   out.push(`VITE_DEV_TOKEN=${data.session.access_token}`);
