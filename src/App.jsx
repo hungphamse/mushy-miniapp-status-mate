@@ -33,7 +33,7 @@ const STATUS_META = {
 
 const STATUS_DESCRIPTIONS = {
   available: 'Có thể trao đổi',
-  busy: 'Phản hồi sau 30 phút',
+  busy: 'Không thể phản hồi ngay',
   focus: 'Chỉ ping nếu urgent',
 };
 

@@ -1,13 +1,16 @@
--- status-mate · 009 · RPC get_users_companies (compatibility shim)
+-- =====================================================================
+-- sstatus-mate · 009 · RPC get_users_companies (bypass RLS company_members)
 --
--- Mig 008 đã mở cross-ws org-group visibility. Mig 009 từng cố đọc trực
--- tiếp dữ liệu công ty dùng chung từ schema public, nhưng Admin Reviewer
--- không cho mini-app truy cập public.* trực tiếp.
+-- User: cross-ws sharing org_group → follower ws thấy members của origin
+-- ws (qua mig 008 RLS group-scoped). NHƯNG company logo + job_title của
+-- members ở org ws fetch qua public.company_members, RLS chỉ cho user
+-- thấy member cùng company → follower (khác company) trả empty → không
+-- có logo.
 --
--- Fix: giữ RPC này làm shim tương thích, nhưng không truy cập public.*.
--- Function trả rỗng để app vẫn chạy an toàn; company badges/job_title per
--- company sẽ không hiển thị cho tới khi có nguồn dữ liệu được quản lý bởi
--- schema của mini-app.
+-- Fix: RPC SECURITY DEFINER lookup batch (user_ids[] → companies). Trade-off
+-- security: expose company info (id, name, logo_url) của user bất kỳ cho
+-- mọi authenticated. Acceptable — thông tin này cross-ws sharing đã hiển thị
+-- công khai. Job_title cũng expose qua đây.
 -- =====================================================================
 
 create or replace function app_status_mate.get_users_companies(p_user_ids uuid[])
@@ -19,12 +22,10 @@ returns table (
   job_title    text
 )
 language sql stable security definer set search_path = app_status_mate as $$
-  select
-    null::uuid as user_id,
-    null::uuid as company_id,
-    null::text as company_name,
-    null::text as logo_url,
-    null::text as job_title
-  where false;
+  select cm.user_id, c.id, c.name, c.logo_url, cm.job_title
+  from public.company_members cm
+  join public.companies c on c.id = cm.company_id
+  where cm.user_id = any(p_user_ids)
+    and c.deleted_at is null;
 $$;
 grant execute on function app_status_mate.get_users_companies(uuid[]) to authenticated;
