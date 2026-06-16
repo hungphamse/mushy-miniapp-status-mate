@@ -13,7 +13,7 @@ import OrgGroupSettingsModal from './components/OrgGroupSettingsModal.jsx';
 import { listGroupPeople, personLabel } from './lib/app/people.js';
 import { listOrgGroups, createOrgGroup } from './lib/app/org-groups.js';
 import {
-  fetchOrgChart, api, slugify, allocationTotals, allocStatus,
+  fetchOrgChart, listMeetingRooms, listMeetingParticipants, api, slugify, allocationTotals, allocStatus,
   describeEvent, timeAgo, formatVNPhone,
 } from './lib/app/api.js';
 import './App.css';
@@ -29,6 +29,7 @@ const STATUS_META = {
   available:      { label: 'Available',      tone: 'ok'  },
   busy:           { label: 'Busy',           tone: 'warn' },
   focus:          { label: 'Focus',          tone: 'err' },
+  in_meeting:     { label: 'In Meeting',     tone: 'meeting' },
   do_not_disturb: { label: 'Do Not Disturb', tone: 'dnd' },
 };
 
@@ -36,6 +37,7 @@ const STATUS_DESCRIPTIONS = {
   available:      'Có thể trao đổi',
   busy:           'Không thể phản hồi ngay',
   focus:          'Chỉ ping nếu urgent',
+  in_meeting:     'Đang trong cuộc họp',
   do_not_disturb: 'Không làm phiền — chỉ liên hệ khẩn cấp',
 };
 
@@ -44,11 +46,13 @@ const STATUS_FILTERS = [
   { value: 'available',      label: 'Available'      },
   { value: 'busy',           label: 'Busy'           },
   { value: 'focus',          label: 'Focus'          },
+  { value: 'in_meeting',     label: 'In Meeting'     },
   { value: 'do_not_disturb', label: 'Do Not Disturb' },
 ];
 
 const STATUS_DURATION_OPTIONS = [
   { value: 'none', label: 'Không giới hạn' },
+  { value: '25', label: '25 phút' },
   { value: '30', label: '30 phút' },
   { value: '45', label: '45 phút' },
   { value: '60', label: '60 phút' },
@@ -61,6 +65,8 @@ const STATUS_DURATION_OPTIONS = [
   { value: '1440', label: '24 giờ' },
   { value: 'custom', label: 'Chọn thời điểm kết thúc' },
 ];
+
+const MEETING_DURATION_OPTIONS = STATUS_DURATION_OPTIONS.filter((o) => o.value !== 'none');
 
 // Reason → human-readable label (Team View + PersonActions)
 const REASON_LABELS = {
@@ -364,6 +370,7 @@ export default function App() {
         reason: norm.expired ? null : (p.status_reason || null),
         source: p.status_source || 'self',
         customReasonText: norm.expired ? null : (p.status_custom_reason || null),
+        meetingRoomId: norm.expired ? null : (p.meeting_room_id || null),
       };
     }
     return map;
@@ -557,52 +564,64 @@ export default function App() {
       )}
 
       {activeGroupId && (
-        <MyStatusCard
-          currentStatus={myStatusInfo.status}
-          currentReason={myStatusReasDisplay}
-          currentSource={myStatusInfo.source}
-          currentDesc={myStatusDesc}
-          currentText={myStatusText}
-          remaining={myStatusRemain}
-          editStatus={myStatus}
-          editMsg={myStatusMsg}
-          editDuration={myStatusDuration}
-          editUntil={myStatusUntil}
-          editReason={myStatusReason}
-          editCustomText={myStatusCustomText}
-          busy={myStatusBusy}
-          editOpen={myStatusEditOpen}
-          onEditOpen={() => setMyStatusEditOpen(true)}
-          onEditClose={() => setMyStatusEditOpen(false)}
-          onStatusSelect={(value) => {
-            setMyStatusDirty(true);
-            setMyStatus(value);
-            const opts = REASON_OPTIONS[value];
-            const defaultReason = opts?.[0]?.value ?? null;
-            setMyStatusReason(defaultReason);
-            if (defaultReason !== 'custom') setMyStatusCustomText('');
-          }}
-          onMsgChange={(value) => { setMyStatusDirty(true); setMyStatusMsg(value); }}
-          onReasonChange={(value) => {
-            setMyStatusDirty(true);
-            setMyStatusReason(value);
-            if (value !== 'custom') setMyStatusCustomText('');
-          }}
-          onCustomTextChange={(value) => { setMyStatusDirty(true); setMyStatusCustomText(value); }}
-          onDurationChange={(value) => {
-            setMyStatusDirty(true);
-            setMyStatusDuration(value);
-            if (value === 'custom') {
-              const iso = new Date(Date.now() + 30 * 60000).toISOString();
-              setMyStatusUntil(toLocalInputValue(iso));
-            } else {
-              setMyStatusUntil('');
-            }
-          }}
-          onUntilChange={(value) => { setMyStatusDirty(true); setMyStatusUntil(value); }}
-          onSave={saveMyStatus}
-          onClear={clearMyStatus}
-        />
+        <>
+          <MyStatusCard
+            currentStatus={myStatusInfo.status}
+            currentReason={myStatusReasDisplay}
+            currentSource={myStatusInfo.source}
+            currentDesc={myStatusDesc}
+            currentText={myStatusText}
+            remaining={myStatusRemain}
+            editStatus={myStatus}
+            editMsg={myStatusMsg}
+            editDuration={myStatusDuration}
+            editUntil={myStatusUntil}
+            editReason={myStatusReason}
+            editCustomText={myStatusCustomText}
+            busy={myStatusBusy}
+            editOpen={myStatusEditOpen}
+            onEditOpen={() => setMyStatusEditOpen(true)}
+            onEditClose={() => setMyStatusEditOpen(false)}
+            onStatusSelect={(value) => {
+              setMyStatusDirty(true);
+              setMyStatus(value);
+              const opts = REASON_OPTIONS[value];
+              const defaultReason = opts?.[0]?.value ?? null;
+              setMyStatusReason(defaultReason);
+              if (defaultReason !== 'custom') setMyStatusCustomText('');
+            }}
+            onMsgChange={(value) => { setMyStatusDirty(true); setMyStatusMsg(value); }}
+            onReasonChange={(value) => {
+              setMyStatusDirty(true);
+              setMyStatusReason(value);
+              if (value !== 'custom') setMyStatusCustomText('');
+            }}
+            onCustomTextChange={(value) => { setMyStatusDirty(true); setMyStatusCustomText(value); }}
+            onDurationChange={(value) => {
+              setMyStatusDirty(true);
+              setMyStatusDuration(value);
+              if (value === 'custom') {
+                const iso = new Date(Date.now() + 30 * 60000).toISOString();
+                setMyStatusUntil(toLocalInputValue(iso));
+              } else {
+                setMyStatusUntil('');
+              }
+            }}
+            onUntilChange={(value) => { setMyStatusDirty(true); setMyStatusUntil(value); }}
+            onSave={saveMyStatus}
+            onClear={clearMyStatus}
+          />
+          <MeetingControlPanel
+            activeGroupId={activeGroupId}
+            ctx={ctx}
+            isAdmin={isAdmin}
+            people={people}
+            statusByUser={statusByUser}
+            nowTick={nowTick}
+            dialog={dialog}
+            reloadPeople={reloadPeople}
+          />
+        </>
       )}
 
       <div className="oc-filter-bar">
@@ -692,6 +711,14 @@ export default function App() {
           <div className="oc-legend-item">
             <span className="oc-status-pill oc-status-pill--focus"><span className="oc-status-dot" />Focus</span>
             <span className="oc-legend-text">Đang tập trung, chỉ ping nếu cần thiết</span>
+          </div>
+          <div className="oc-legend-item">
+            <span className="oc-status-pill oc-status-pill--in_meeting"><span className="oc-status-dot" />In Meeting</span>
+            <span className="oc-legend-text">Đang trong cuộc họp, host có thể set/restore</span>
+          </div>
+          <div className="oc-legend-item">
+            <span className="oc-status-pill oc-status-pill--do_not_disturb"><span className="oc-status-dot" />Do Not Disturb</span>
+            <span className="oc-legend-text">Không làm phiền, chỉ liên hệ khi khẩn cấp</span>
           </div>
         </div>
       </div>
@@ -859,6 +886,317 @@ function MyStatusCard({
   );
 }
 
+function resolveMeetingUntil(duration, customUntil) {
+  if (duration === 'custom') return fromLocalInputValue(customUntil);
+  const min = parseInt(duration, 10);
+  if (!Number.isFinite(min) || min <= 0) return null;
+  return new Date(Date.now() + min * 60000).toISOString();
+}
+
+function MeetingControlPanel({
+  activeGroupId, ctx, isAdmin, people, statusByUser, nowTick, dialog, reloadPeople,
+}) {
+  const [rooms, setRooms] = useState([]);
+  const [roomId, setRoomId] = useState('');
+  const [participants, setParticipants] = useState([]);
+  const [title, setTitle] = useState('');
+  const [duration, setDuration] = useState('30');
+  const [customUntil, setCustomUntil] = useState('');
+  const [participantUserId, setParticipantUserId] = useState('');
+  const [targetUserId, setTargetUserId] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [backendReady, setBackendReady] = useState(true);
+
+  const loadRooms = useCallback(async (preferredId = '') => {
+    if (!activeGroupId) return;
+    try {
+      const nextRooms = await listMeetingRooms(activeGroupId);
+      setBackendReady(true);
+      setRooms(nextRooms);
+      setRoomId((prev) => {
+        if (preferredId && nextRooms.some((r) => r.id === preferredId)) return preferredId;
+        if (prev && nextRooms.some((r) => r.id === prev)) return prev;
+        return nextRooms.find((r) => r.status === 'active')?.id || nextRooms[0]?.id || '';
+      });
+    } catch (e) {
+      setBackendReady(false);
+      setRooms([]);
+      setParticipants([]);
+      setRoomId('');
+    }
+  }, [activeGroupId]);
+
+  const loadParticipants = useCallback(async () => {
+    if (!roomId) {
+      setParticipants([]);
+      return;
+    }
+    try {
+      const nextParticipants = await listMeetingParticipants(roomId);
+      setParticipants(nextParticipants);
+    } catch {
+      setParticipants([]);
+    }
+  }, [roomId]);
+
+  useEffect(() => { loadRooms(); }, [loadRooms]);
+  useEffect(() => { loadParticipants(); }, [loadParticipants]);
+
+  const activeRoom = rooms.find((r) => r.id === roomId) || null;
+  const activeParticipants = participants.filter((p) => !p.left_at);
+  const participantIds = new Set(activeParticipants.map((p) => p.user_id));
+  const meParticipant = activeParticipants.find((p) => p.user_id === ctx?.userId);
+  const canManage = !!activeRoom && (
+    isAdmin || activeRoom.host_user_id === ctx?.userId || meParticipant?.role === 'co_host'
+  );
+  const availablePeople = people.filter((p) => !participantIds.has(p.user_id));
+  const roomOptions = rooms.map((r) => ({
+    value: r.id,
+    label: `${r.title || 'Meeting'} · ${r.status}`,
+  }));
+  const activeUntilMs = activeRoom?.planned_end_at
+    ? new Date(activeRoom.planned_end_at).getTime()
+    : null;
+  const roomRemaining = formatRemaining(activeUntilMs, nowTick);
+
+  const run = async (fn, success) => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      const result = await fn();
+      await loadRooms(result?.id || roomId);
+      await loadParticipants();
+      await reloadPeople();
+      if (success) dialog.success('Đã cập nhật', success);
+      return result;
+    } catch (e) {
+      dialog.error('Meeting Mode lỗi', e?.message || String(e));
+      return null;
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const createRoom = async () => {
+    const until = resolveMeetingUntil(duration, customUntil);
+    if (!until) {
+      dialog.error('Thiếu thời điểm kết thúc', 'Chọn thời lượng hợp lệ cho meeting.');
+      return;
+    }
+    const created = await run(
+      () => api.createMeetingRoom(activeGroupId, title.trim() || 'Meeting', until, []),
+      'Đã tạo meeting room.',
+    );
+    if (created?.id) setRoomId(created.id);
+    setTitle('');
+  };
+
+  const addParticipant = async () => {
+    if (!roomId || !participantUserId) return;
+    await run(
+      () => api.addMeetingParticipants(roomId, [participantUserId]),
+      'Đã thêm participant.',
+    );
+    setParticipantUserId('');
+  };
+
+  const applyAll = async () => {
+    if (!roomId || activeRoom?.status !== 'active') return;
+    await run(
+      () => api.applyMeetingMode(roomId, null, activeRoom.planned_end_at || resolveMeetingUntil(duration, customUntil)),
+      'Đã set In Meeting cho participants.',
+    );
+  };
+
+  const setOne = async () => {
+    if (!roomId || !targetUserId) return;
+    await run(
+      () => api.setStatusForMember(
+        roomId,
+        targetUserId,
+        'in_meeting',
+        activeRoom?.title || 'In meeting',
+        activeRoom?.planned_end_at || resolveMeetingUntil(duration, customUntil),
+      ),
+      'Đã set In Meeting cho member.',
+    );
+    setTargetUserId('');
+  };
+
+  const restoreOne = async () => {
+    if (!roomId || !targetUserId) return;
+    await run(
+      () => api.restoreMeetingStatusForRoom(roomId, [targetUserId]),
+      'Đã restore trạng thái của member.',
+    );
+    setTargetUserId('');
+  };
+
+  const endRoom = async () => {
+    if (!roomId) return;
+    const ok = await dialog.confirm(
+      'Kết thúc meeting?',
+      'Trạng thái host-set sẽ được restore về trạng thái trước meeting.',
+      { confirmLabel: 'Kết thúc', cancelLabel: 'Huỷ' },
+    );
+    if (!ok) return;
+    await run(() => api.endMeetingRoom(roomId, true), 'Đã kết thúc meeting.');
+  };
+
+  return (
+    <div className="oc-meeting-panel">
+      <div className="oc-meeting-head">
+        <div>
+          <div className="oc-status-title">Meeting Mode</div>
+          {activeRoom ? (
+            <div className="oc-meeting-sub">
+              {activeRoom.title || 'Meeting'}{roomRemaining ? ` · ${roomRemaining}` : ''}
+            </div>
+          ) : (
+            <div className="oc-meeting-sub">Chưa có meeting room</div>
+          )}
+        </div>
+        <span className={`oc-meeting-state oc-meeting-state--${activeRoom?.status || 'empty'}`}>
+          {activeRoom?.status || 'empty'}
+        </span>
+      </div>
+
+      {!backendReady ? (
+        <div className="oc-meeting-empty">Migration 013 chưa sẵn sàng trên database.</div>
+      ) : (
+        <>
+          <div className="oc-meeting-create">
+            <input
+              className="mushy-input"
+              value={title}
+              maxLength={100}
+              onChange={(e) => setTitle(e.target.value)}
+              placeholder="Tên meeting"
+            />
+            <Select
+              value={duration}
+              onChange={(value) => {
+                setDuration(value);
+                if (value === 'custom') {
+                  setCustomUntil(toLocalInputValue(new Date(Date.now() + 30 * 60000).toISOString()));
+                } else {
+                  setCustomUntil('');
+                }
+              }}
+              options={MEETING_DURATION_OPTIONS}
+              placeholder="Thời lượng"
+            />
+            {duration === 'custom' && (
+              <DatePicker
+                selected={toDateFromLocalInput(customUntil)}
+                onChange={(date) => setCustomUntil(date ? toLocalInputValue(date.toISOString()) : '')}
+                showTimeSelect
+                timeIntervals={15}
+                dateFormat="Pp"
+                timeCaption="Giờ"
+                locale="vi"
+                placeholderText="Kết thúc lúc"
+                className="mushy-input oc-datepicker"
+              />
+            )}
+            <button className="mushy-btn mushy-btn--primary" disabled={busy} onClick={createRoom}>
+              Tạo room
+            </button>
+          </div>
+
+          {rooms.length > 0 && (
+            <div className="oc-meeting-room-select">
+              <Select value={roomId} onChange={setRoomId} options={roomOptions} placeholder="Chọn meeting room" />
+            </div>
+          )}
+
+          {activeRoom && (
+            <>
+              <div className="oc-meeting-actions">
+                <button
+                  className="mushy-btn mushy-btn--ghost"
+                  disabled={busy || !canManage || activeRoom.status !== 'scheduled'}
+                  onClick={() => run(() => api.startMeetingRoom(roomId), 'Meeting đã bắt đầu.')}
+                >
+                  Start
+                </button>
+                <button
+                  className="mushy-btn mushy-btn--ghost"
+                  disabled={busy || !canManage || activeRoom.status !== 'active'}
+                  onClick={applyAll}
+                >
+                  Set all
+                </button>
+                <button
+                  className="mushy-btn mushy-btn--ghost"
+                  disabled={busy || !canManage || activeRoom.status === 'ended'}
+                  onClick={endRoom}
+                >
+                  End & restore
+                </button>
+              </div>
+
+              {canManage && (
+                <div className="oc-meeting-tools">
+                  <div className="oc-meeting-tool">
+                    <MemberSearchSelect
+                      value={participantUserId}
+                      onChange={setParticipantUserId}
+                      people={availablePeople}
+                      placeholder="Thêm participant"
+                    />
+                    <button className="oc-mini-btn" disabled={busy || !participantUserId} onClick={addParticipant}>
+                      +
+                    </button>
+                  </div>
+                  <div className="oc-meeting-tool">
+                    <MemberSearchSelect
+                      value={targetUserId}
+                      onChange={setTargetUserId}
+                      people={people}
+                      placeholder="Host set / restore"
+                    />
+                    <button className="oc-mini-btn" disabled={busy || !targetUserId} onClick={setOne}>
+                      Set
+                    </button>
+                    <button className="oc-mini-btn" disabled={busy || !targetUserId} onClick={restoreOne}>
+                      Restore
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              <div className="oc-meeting-participants">
+                {activeParticipants.length === 0 ? (
+                  <div className="oc-meeting-empty">Chưa có participant.</div>
+                ) : activeParticipants.map((p) => {
+                  const person = people.find((x) => x.user_id === p.user_id);
+                  const info = statusByUser[p.user_id] || { status: 'available', untilMs: null, source: 'self' };
+                  const meta = getStatusMeta(info.status);
+                  const remain = formatRemaining(info.untilMs, nowTick);
+                  return (
+                    <div key={p.user_id} className="oc-meeting-participant">
+                      <div className="oc-meeting-person">
+                        <span>{personLabel(person)}</span>
+                        <small>{p.role}</small>
+                      </div>
+                      <span className={`oc-status-pill oc-status-pill--${info.status}`}>
+                        <span className="oc-status-dot" />{meta.label}
+                      </span>
+                      {info.source === 'host' && <span className="oc-host-badge">Host set</span>}
+                      {remain && <span className="oc-status-remaining">{remain}</span>}
+                    </div>
+                  );
+                })}
+              </div>
+            </>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
 // ---------------- Squad node (đệ quy, collapsible) ----------------
 function SquadNode({ squad, depth, childrenOf, membersOf, peopleMap, totals,
   requestsBySquad, myPending, ctx, isAdmin, setModal, reload, dialog,
@@ -884,7 +1222,7 @@ function SquadNode({ squad, depth, childrenOf, membersOf, peopleMap, totals,
     const st = statusByUser[r.user_id]?.status || 'available';
     acc[st] = (acc[st] || 0) + 1;
     return acc;
-  }, { available: 0, busy: 0, focus: 0 });
+  }, { available: 0, busy: 0, focus: 0, in_meeting: 0, do_not_disturb: 0 });
 
   // Chạy RPC + reload, báo lỗi qua dialog. Không đóng gì (inline).
   const act = async (fn) => {
@@ -931,6 +1269,12 @@ function SquadNode({ squad, depth, childrenOf, membersOf, peopleMap, totals,
                       </span>
                       <span className="oc-status-count oc-status-count--focus">
                         <span className="oc-status-dot" />{statusCounts.focus}
+                      </span>
+                      <span className="oc-status-count oc-status-count--in_meeting">
+                        <span className="oc-status-dot" />{statusCounts.in_meeting}
+                      </span>
+                      <span className="oc-status-count oc-status-count--do_not_disturb">
+                        <span className="oc-status-dot" />{statusCounts.do_not_disturb}
                       </span>
                     </span>
                   )}

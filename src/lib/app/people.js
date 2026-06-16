@@ -102,14 +102,22 @@ export async function listGroupPeople(groupId) {
   } catch { /* RPC chưa apply hoặc lỗi — skip */ }
 
   // 5. Status-Mate (member_statuses) — optional, fallback nếu chưa apply mig.
-  //    Mig 012 thêm reason, source, custom_reason_text.
-  //    Supabase trả { data: null, error } nếu column chưa có — if (!sErr) guard bắt.
+  //    Mig 012 thêm reason/source/custom_reason_text; mig 013 thêm meeting_room_id.
+  //    Supabase trả { data: null, error } nếu column chưa có — fallback giữ Phase 1 chạy.
   const statusMap = {};
   try {
-    const { data: statuses, error: sErr } = await db
+    let { data: statuses, error: sErr } = await db
       .from('member_statuses')
-      .select('user_id, status, message, status_until, reason, source, custom_reason_text, updated_at')
+      .select('user_id, status, message, status_until, reason, source, custom_reason_text, meeting_room_id, updated_at')
       .eq('org_group_id', groupId);
+    if (sErr) {
+      const fallback = await db
+        .from('member_statuses')
+        .select('user_id, status, message, status_until, reason, source, custom_reason_text, updated_at')
+        .eq('org_group_id', groupId);
+      statuses = fallback.data;
+      sErr = fallback.error;
+    }
     if (!sErr) {
       for (const s of statuses || []) {
         statusMap[s.user_id] = {
@@ -119,6 +127,7 @@ export async function listGroupPeople(groupId) {
           reason: s.reason ?? null,
           source: s.source ?? 'self',
           custom_reason_text: s.custom_reason_text ?? null,
+          meeting_room_id: s.meeting_room_id ?? null,
           updated_at: s.updated_at,
         };
       }
@@ -144,6 +153,7 @@ export async function listGroupPeople(groupId) {
       status_reason: st.reason ?? null,
       status_source: st.source ?? 'self',
       status_custom_reason: st.custom_reason_text ?? null,
+      meeting_room_id: st.meeting_room_id ?? null,
       status_updated_at: st.updated_at ?? null,
     };
   });

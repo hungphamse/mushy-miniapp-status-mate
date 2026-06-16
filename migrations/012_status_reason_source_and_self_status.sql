@@ -1,23 +1,21 @@
 -- =====================================================================
--- status-mate · 012 · Status Reason + Source
+-- status-mate · 012 · Status reason, source, and self-status RPC
 --
--- Mở rộng member_statuses:
---   • status CHECK mở rộng → Phase 2 sẵn sàng (in_meeting, do_not_disturb)
---   • 5 cột mới: reason, source, set_by_user_id, custom_reason_text, previous_status
---   • idx_ms_source index cho Phase 2 host-set queries
+-- This migration extends app_status_mate.member_statuses with metadata that
+-- explains why a user is in a given status and who set it.
 --
--- set_my_status RPC được viết lại (signature mở rộng):
---   • drop old 4-param → tránh PostgREST overload ambiguity
---   • create new 6-param (p_reason, p_custom_reason_text DEFAULT NULL)
---   • auto-derive reason nếu không truyền vào
---   • source luôn = 'self', set_by_user_id = auth.uid() cho self-set
+-- Adds:
+--   • a wider status CHECK constraint
+--   • reason / source / set_by_user_id / custom_reason_text / previous_status
+--   • an index on (org_group_id, source) for host-set lookups
 --
--- Phase 2 sẽ thêm set_status_for_member (host-controlled) riêng.
+-- The self-status RPC is rewritten so callers can optionally pass a reason and
+-- custom reason text, while the database keeps source and audit metadata in sync.
 -- =====================================================================
 
 -- ─────────────────────────────────────────────────────────────────────
--- 1. Mở rộng CHECK constraint 'status'
---    Tên auto-generated của PostgreSQL: member_statuses_status_check
+-- 1. Expand the status CHECK constraint
+--    PostgreSQL's auto-generated name is member_statuses_status_check.
 -- ─────────────────────────────────────────────────────────────────────
 alter table app_status_mate.member_statuses
   drop constraint if exists member_statuses_status_check;
@@ -27,8 +25,8 @@ alter table app_status_mate.member_statuses
   check (status in ('available','busy','focus','in_meeting','do_not_disturb'));
 
 -- ─────────────────────────────────────────────────────────────────────
--- 2. Thêm cột reason
---    NULL = chưa set / available. CHECK explicit để migration idempotent.
+-- 2. Add the reason column
+--    NULL means "not set" or a plain available state.
 -- ─────────────────────────────────────────────────────────────────────
 alter table app_status_mate.member_statuses
   add column if not exists reason text
@@ -39,8 +37,8 @@ alter table app_status_mate.member_statuses
     );
 
 -- ─────────────────────────────────────────────────────────────────────
--- 3. Thêm cột source
---    DEFAULT 'self' — hàng cũ chưa có source sẽ thấy 'self' tự động.
+-- 3. Add the source column
+--    Default to 'self' so existing rows keep a sensible value.
 -- ─────────────────────────────────────────────────────────────────────
 alter table app_status_mate.member_statuses
   add column if not exists source text not null default 'self'
@@ -48,15 +46,15 @@ alter table app_status_mate.member_statuses
     check (source in ('self','host','system_timer','meeting_sync'));
 
 -- ─────────────────────────────────────────────────────────────────────
--- 4. Thêm cột set_by_user_id
---    Ai đã set trạng thái này (auth.uid() hoặc host). Phase 2 dùng.
+-- 4. Add the set_by_user_id column
+--    Records who last wrote the status row.
 -- ─────────────────────────────────────────────────────────────────────
 alter table app_status_mate.member_statuses
   add column if not exists set_by_user_id uuid references auth.users(id);
 
 -- ─────────────────────────────────────────────────────────────────────
--- 5. Thêm cột custom_reason_text
---    Chỉ có nghĩa khi reason = 'custom'. Giới hạn 60 ký tự.
+-- 5. Add the custom_reason_text column
+--    Used only when reason = 'custom' and capped at 60 characters.
 -- ─────────────────────────────────────────────────────────────────────
 alter table app_status_mate.member_statuses
   add column if not exists custom_reason_text text
@@ -64,30 +62,29 @@ alter table app_status_mate.member_statuses
     check (custom_reason_text is null or char_length(custom_reason_text) <= 60);
 
 -- ─────────────────────────────────────────────────────────────────────
--- 6. Thêm cột previous_status
---    Snapshot status cũ dạng JSON — Phase 3 dùng để auto-restore
---    sau khi meeting kết thúc. Không expose ra UI ở Phase 1.
+-- 6. Add the previous_status column
+--    Stores a JSON snapshot of the prior row so later restore flows can put
+--    the user back where they were before an override.
 -- ─────────────────────────────────────────────────────────────────────
 alter table app_status_mate.member_statuses
   add column if not exists previous_status jsonb;
 
 -- ─────────────────────────────────────────────────────────────────────
--- 7. Index cho Phase 2 host-set queries
+-- 7. Add an index for source-aware status queries
 -- ─────────────────────────────────────────────────────────────────────
 create index if not exists idx_ms_source
   on app_status_mate.member_statuses (org_group_id, source);
 
 -- ─────────────────────────────────────────────────────────────────────
--- 8. Drop old set_my_status (4-param signature)
---    Bắt buộc drop trước khi tạo lại — PostgreSQL không cho create or
---    replace function khi số param thay đổi (khác signature = overload
---    mới). PostgREST sẽ báo lỗi "Could not find the function" khi có
---    2 overload cùng tên. Drop + create sạch hơn.
+-- 8. Replace the old 4-parameter set_my_status function
+--    PostgreSQL treats a changed parameter list as a new overload, so the old
+--    signature must be removed before creating the new one.
 -- ─────────────────────────────────────────────────────────────────────
 drop function if exists app_status_mate.set_my_status(uuid, text, text, timestamptz);
 
 -- ─────────────────────────────────────────────────────────────────────
--- 9. Tạo lại set_my_status với 6 param (2 param cuối DEFAULT NULL)
+-- 9. Recreate set_my_status with 6 parameters
+--    The last two parameters are optional and default to NULL.
 -- ─────────────────────────────────────────────────────────────────────
 create function app_status_mate.set_my_status(
   p_group_id            uuid,
@@ -108,31 +105,31 @@ declare
   v_reason text;
   v_custom text;
 begin
-  -- Auth check
+  -- Only org-group members can update their own status.
   if not app_status_mate.is_org_group_member(p_group_id) then
     raise exception 'Bạn không thuộc org group này';
   end if;
 
-  -- Validate status (bao gồm cả giá trị Phase 2 để DB nhất quán)
+  -- Allow the full set of statuses supported by the app.
   if p_status not in ('available','busy','focus','in_meeting','do_not_disturb') then
     raise exception 'Status không hợp lệ: %', p_status;
   end if;
 
-  -- Validate message length
+  -- Keep free-text status messages short.
   if p_message is not null and char_length(p_message) > 200 then
     raise exception 'Message quá dài (tối đa 200 ký tự)';
   end if;
 
-  -- Resolve workspace (origin ws của group)
+  -- Resolve the group's source workspace.
   v_ws := app_status_mate._group_origin_ws(p_group_id);
 
-  -- Normalize expires_at: bỏ qua nếu đã quá hạn
+  -- Ignore deadlines that are already in the past.
   v_until := p_until;
   if v_until is not null and v_until <= now() then
     v_until := null;
   end if;
 
-  -- Auto-derive reason nếu caller không truyền vào
+  -- Infer a reason when the caller does not provide one.
   v_reason := p_reason;
   if v_reason is null then
     case p_status
@@ -144,14 +141,14 @@ begin
     end case;
   end if;
 
-  -- Validate reason enum
+  -- Enforce the supported reason values.
   if v_reason is not null
     and v_reason not in ('manual_focus','manual_busy','meeting_room','deadline','break','custom')
   then
     raise exception 'Reason không hợp lệ: %', v_reason;
   end if;
 
-  -- custom_reason_text chỉ lưu khi reason = 'custom'; strip và limit 60 chars
+  -- Only persist custom_reason_text when reason = 'custom'.
   v_custom := null;
   if v_reason = 'custom' then
     v_custom := nullif(btrim(coalesce(p_custom_reason_text, '')), '');
@@ -160,7 +157,7 @@ begin
     end if;
   end if;
 
-  -- Upsert (unique: org_group_id, user_id)
+  -- Upsert the current user's row.
   insert into app_status_mate.member_statuses
     (workspace_id, org_group_id, user_id,
      status, message, status_until,

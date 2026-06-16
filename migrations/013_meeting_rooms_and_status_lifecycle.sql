@@ -1,14 +1,20 @@
 -- =====================================================================
--- status-mate · 013 · Meeting foundation + status event log
+-- status-mate · 013 · Meeting rooms and status lifecycle
 --
--- Mục tiêu:
---   1) Chốt phần còn lại của Phase 1 ở tầng data: status change có log,
---      có snapshot để restore, và gắn status với room meeting.
---   2) Mở đường cho Phase 2: meeting room, participant, host/co-host
---      control, bulk apply in_meeting, restore khi meeting kết thúc.
+-- Tables:
+--   - meeting_rooms: room metadata and lifecycle state
+--   - meeting_participants: room membership and whether a status override was applied
+--   - status_event_log: audit trail for room actions and status changes
 --
--- File này chỉ tạo schema / RPC. UI sẽ dùng ở bước sau.
--- Chỉ ref app_status_mate.* — Reviewer sẽ duplicate sang dev schema.
+-- RPCs:
+--   - create/start/end room
+--   - add participants
+--   - apply in_meeting to one member or the whole room
+--   - restore the previous status snapshot when a room ends
+--
+-- This migration only defines schema and RPCs. The client UI can call them later.
+-- Write only app_status_mate.* here; the Admin Portal applies this to the
+-- production schema and mirrors it to the matching dev schema automatically.
 -- =====================================================================
 
 -- ---------------------------------------------------------------------
@@ -106,7 +112,7 @@ create index if not exists idx_sel_user_created
   on app_status_mate.status_event_log (user_id, created_at desc);
 
 -- ---------------------------------------------------------------------
--- 4. Grants + RLS
+-- 4. Permissions + RLS
 -- ---------------------------------------------------------------------
 grant select, insert, update, delete on app_status_mate.meeting_rooms to authenticated;
 grant select, insert, update, delete on app_status_mate.meeting_participants to authenticated;
@@ -157,7 +163,7 @@ create index if not exists idx_ms_meeting_room
   on app_status_mate.member_statuses (meeting_room_id);
 
 -- ---------------------------------------------------------------------
--- 6. Helpers
+-- 6. Internal helpers for snapshots and meeting overrides
 -- ---------------------------------------------------------------------
 create or replace function app_status_mate._append_status_event(
   p_workspace_id uuid,
@@ -579,7 +585,7 @@ end $$;
 grant execute on function app_status_mate._restore_meeting_participant(uuid, uuid, text) to authenticated;
 
 -- ---------------------------------------------------------------------
--- 7. Public RPCs for the meeting lifecycle
+-- 7. Public RPCs for the room lifecycle
 -- ---------------------------------------------------------------------
 create or replace function app_status_mate.create_meeting_room(
   p_group_id uuid,
@@ -927,7 +933,7 @@ end $$;
 grant execute on function app_status_mate.end_meeting_room(uuid, boolean) to authenticated;
 
 -- ---------------------------------------------------------------------
--- 8. Update self-set status RPCs for the new lifecycle
+-- 8. Keep self-set status RPCs compatible with meeting overrides
 -- ---------------------------------------------------------------------
 create or replace function app_status_mate.set_my_status(
   p_group_id            uuid,
@@ -1095,7 +1101,7 @@ end $$;
 grant execute on function app_status_mate.clear_my_status(uuid) to authenticated;
 
 -- ---------------------------------------------------------------------
--- 9. Keep current phase-1/2 linkage visible in queries
+-- 9. Index for member-status queries with room linkage
 -- ---------------------------------------------------------------------
 create index if not exists idx_ms_group_user_meeting
   on app_status_mate.member_statuses (org_group_id, user_id, meeting_room_id);

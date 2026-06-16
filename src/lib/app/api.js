@@ -26,6 +26,28 @@ export async function fetchOrgChart(groupId) {
   };
 }
 
+export async function listMeetingRooms(groupId) {
+  if (!groupId) return [];
+  const { data, error } = await db
+    .from('meeting_rooms')
+    .select('*')
+    .eq('org_group_id', groupId)
+    .order('created_at', { ascending: false });
+  if (error) throw error;
+  return data || [];
+}
+
+export async function listMeetingParticipants(roomId) {
+  if (!roomId) return [];
+  const { data, error } = await db
+    .from('meeting_participants')
+    .select('*')
+    .eq('room_id', roomId)
+    .order('joined_at', { ascending: true });
+  if (error) throw error;
+  return data || [];
+}
+
 const call = async (fn, args) => {
   const { data, error } = await db.rpc(fn, args);
   if (error) throw error;
@@ -73,6 +95,34 @@ export const api = {
       p_custom_reason_text: p_custom_reason_text || null,
     }),
   clearMyStatus: (p_group_id) => call('clear_my_status', { p_group_id }),
+  createMeetingRoom: (p_group_id, p_title, p_planned_end_at, p_co_host_user_ids = []) =>
+    call('create_meeting_room', {
+      p_group_id,
+      p_title: p_title || 'Meeting',
+      p_planned_end_at,
+      p_co_host_user_ids,
+    }),
+  addMeetingParticipants: (p_room_id, p_user_ids) =>
+    call('add_meeting_participants', { p_room_id, p_user_ids }),
+  startMeetingRoom: (p_room_id) => call('start_meeting_room', { p_room_id }),
+  applyMeetingMode: (p_room_id, p_user_ids, p_until) =>
+    call('apply_meeting_mode', {
+      p_room_id,
+      p_user_ids: p_user_ids || null,
+      p_until: p_until || null,
+    }),
+  setStatusForMember: (p_room_id, p_user_id, p_status, p_message, p_until) =>
+    call('set_status_for_member', {
+      p_room_id,
+      p_user_id,
+      p_status: p_status || 'in_meeting',
+      p_message: p_message || null,
+      p_until: p_until || null,
+    }),
+  restoreMeetingStatusForRoom: (p_room_id, p_user_ids = null) =>
+    call('restore_meeting_status_for_room', { p_room_id, p_user_ids }),
+  endMeetingRoom: (p_room_id, p_restore = true) =>
+    call('end_meeting_room', { p_room_id, p_restore }),
 };
 
 // slug từ tên: bỏ dấu, lowercase, gạch nối. Min 2 ký tự (regex squad.slug).
