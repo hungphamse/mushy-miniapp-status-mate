@@ -26,22 +26,25 @@ registerLocale('vi', vi);
 const OTHER = '__other__';
 
 const STATUS_META = {
-  available: { label: 'Available', tone: 'ok' },
-  busy: { label: 'Busy', tone: 'warn' },
-  focus: { label: 'Focus', tone: 'err' },
+  available:      { label: 'Available',      tone: 'ok'  },
+  busy:           { label: 'Busy',           tone: 'warn' },
+  focus:          { label: 'Focus',          tone: 'err' },
+  do_not_disturb: { label: 'Do Not Disturb', tone: 'dnd' },
 };
 
 const STATUS_DESCRIPTIONS = {
-  available: 'Có thể trao đổi',
-  busy: 'Không thể phản hồi ngay',
-  focus: 'Chỉ ping nếu urgent',
+  available:      'Có thể trao đổi',
+  busy:           'Không thể phản hồi ngay',
+  focus:          'Chỉ ping nếu urgent',
+  do_not_disturb: 'Không làm phiền — chỉ liên hệ khẩn cấp',
 };
 
 const STATUS_FILTERS = [
-  { value: 'all', label: 'Tất cả' },
-  { value: 'available', label: 'Available' },
-  { value: 'busy', label: 'Busy' },
-  { value: 'focus', label: 'Focus' },
+  { value: 'all',            label: 'Tất cả'         },
+  { value: 'available',      label: 'Available'      },
+  { value: 'busy',           label: 'Busy'           },
+  { value: 'focus',          label: 'Focus'          },
+  { value: 'do_not_disturb', label: 'Do Not Disturb' },
 ];
 
 const STATUS_DURATION_OPTIONS = [
@@ -58,6 +61,43 @@ const STATUS_DURATION_OPTIONS = [
   { value: '1440', label: '24 giờ' },
   { value: 'custom', label: 'Chọn thời điểm kết thúc' },
 ];
+
+// Reason → human-readable label (Team View + PersonActions)
+const REASON_LABELS = {
+  manual_focus: 'Deep work',
+  manual_busy:  'Bận việc',
+  meeting_room: 'In Meeting',
+  deadline:     'Deadline',
+  break:        'Break',
+};
+
+// Dropdown options trong editor theo từng status
+const REASON_OPTIONS = {
+  focus: [
+    { value: 'manual_focus', label: 'Deep work' },
+    { value: 'deadline',     label: 'Deadline' },
+    { value: 'custom',       label: '✎ Tự nhập…' },
+  ],
+  busy: [
+    { value: 'manual_busy',  label: 'Bận việc' },
+    { value: 'deadline',     label: 'Deadline' },
+    { value: 'break',        label: 'Break' },
+    { value: 'custom',       label: '✎ Tự nhập…' },
+  ],
+  do_not_disturb: [
+    { value: 'manual_focus', label: 'Deep work' },
+    { value: 'deadline',     label: 'Deadline' },
+    { value: 'break',        label: 'Break' },
+    { value: 'custom',       label: '✎ Tự nhập…' },
+  ],
+};
+
+// reason + customReasonText → chuỗi hiển thị. null = không hiện.
+function reasonDisplay(reason, customReasonText) {
+  if (!reason) return null;
+  if (reason === 'custom') return customReasonText?.slice(0, 60) || null;
+  return REASON_LABELS[reason] || null;
+}
 
 function getStatusMeta(status) {
   return STATUS_META[status] || STATUS_META.available;
@@ -159,6 +199,8 @@ export default function App() {
   const [myStatusBusy, setMyStatusBusy] = useState(false);
   const [myStatusDirty, setMyStatusDirty] = useState(false);
   const [myStatusEditOpen, setMyStatusEditOpen] = useState(false);
+  const [myStatusReason, setMyStatusReason] = useState(null);
+  const [myStatusCustomText, setMyStatusCustomText] = useState('');
   const [modal, setModal] = useState(null); // { kind, ... }
   // Org groups ws đang subscribe + group đang active.
   const [groups, setGroups] = useState(null);  // null = chưa load
@@ -319,6 +361,9 @@ export default function App() {
         message: norm.expired ? null : (p.status_message || null),
         untilMs: norm.untilMs,
         updatedAt: p.status_updated_at || null,
+        reason: norm.expired ? null : (p.status_reason || null),
+        source: p.status_source || 'self',
+        customReasonText: norm.expired ? null : (p.status_custom_reason || null),
       };
     }
     return map;
@@ -331,6 +376,8 @@ export default function App() {
     const status = info?.status || 'available';
     setMyStatus(status);
     setMyStatusMsg(info?.message || '');
+    setMyStatusReason(info?.reason || null);
+    setMyStatusCustomText(info?.customReasonText || '');
     if (info?.untilMs) {
       setMyStatusDuration('custom');
       setMyStatusUntil(toLocalInputValue(new Date(info.untilMs).toISOString()));
@@ -382,10 +429,11 @@ export default function App() {
 
   const myTotal = ctx ? (totals[ctx.userId] || 0) : 0;
   const myInAny = ctx && data.members.some((r) => r.user_id === ctx.userId);
-  const myStatusInfo = ctx ? (statusByUser[ctx.userId] || { status: 'available' }) : { status: 'available' };
+  const myStatusInfo = ctx ? (statusByUser[ctx.userId] || { status: 'available', source: 'self' }) : { status: 'available', source: 'self' };
   const myStatusRemain = formatRemainingRounded(myStatusInfo.untilMs, nowTick);
   const myStatusDesc = STATUS_DESCRIPTIONS[myStatusInfo.status] || '';
   const myStatusText = myStatusInfo.message || '';
+  const myStatusReasDisplay = reasonDisplay(myStatusInfo.reason, myStatusInfo.customReasonText);
 
   const saveMyStatus = useCallback(async () => {
     if (!activeGroupId) return;
@@ -398,9 +446,11 @@ export default function App() {
         until = new Date(Date.now() + min * 60000).toISOString();
       }
     }
+    const reason = myStatus === 'available' ? null : (myStatusReason || null);
+    const customText = reason === 'custom' ? (myStatusCustomText.trim() || null) : null;
     setMyStatusBusy(true);
     try {
-      await api.setMyStatus(activeGroupId, myStatus, myStatusMsg.trim() || null, until);
+      await api.setMyStatus(activeGroupId, myStatus, myStatusMsg.trim() || null, until, reason, customText);
       setMyStatusDirty(false);
       setMyStatusEditOpen(false);
       await reloadPeople();
@@ -409,7 +459,7 @@ export default function App() {
     } finally {
       setMyStatusBusy(false);
     }
-  }, [activeGroupId, myStatus, myStatusMsg, myStatusDuration, myStatusUntil, dialog, reloadPeople]);
+  }, [activeGroupId, myStatus, myStatusMsg, myStatusDuration, myStatusUntil, myStatusReason, myStatusCustomText, dialog, reloadPeople]);
 
   const clearMyStatus = useCallback(async () => {
     if (!activeGroupId) return;
@@ -421,6 +471,8 @@ export default function App() {
       setMyStatusMsg('');
       setMyStatusDuration('none');
       setMyStatusUntil('');
+      setMyStatusReason(null);
+      setMyStatusCustomText('');
       setMyStatusEditOpen(false);
       await reloadPeople();
     } catch (e) {
@@ -507,6 +559,8 @@ export default function App() {
       {activeGroupId && (
         <MyStatusCard
           currentStatus={myStatusInfo.status}
+          currentReason={myStatusReasDisplay}
+          currentSource={myStatusInfo.source}
           currentDesc={myStatusDesc}
           currentText={myStatusText}
           remaining={myStatusRemain}
@@ -514,6 +568,8 @@ export default function App() {
           editMsg={myStatusMsg}
           editDuration={myStatusDuration}
           editUntil={myStatusUntil}
+          editReason={myStatusReason}
+          editCustomText={myStatusCustomText}
           busy={myStatusBusy}
           editOpen={myStatusEditOpen}
           onEditOpen={() => setMyStatusEditOpen(true)}
@@ -521,8 +577,18 @@ export default function App() {
           onStatusSelect={(value) => {
             setMyStatusDirty(true);
             setMyStatus(value);
+            const opts = REASON_OPTIONS[value];
+            const defaultReason = opts?.[0]?.value ?? null;
+            setMyStatusReason(defaultReason);
+            if (defaultReason !== 'custom') setMyStatusCustomText('');
           }}
           onMsgChange={(value) => { setMyStatusDirty(true); setMyStatusMsg(value); }}
+          onReasonChange={(value) => {
+            setMyStatusDirty(true);
+            setMyStatusReason(value);
+            if (value !== 'custom') setMyStatusCustomText('');
+          }}
+          onCustomTextChange={(value) => { setMyStatusDirty(true); setMyStatusCustomText(value); }}
           onDurationChange={(value) => {
             setMyStatusDirty(true);
             setMyStatusDuration(value);
@@ -674,9 +740,10 @@ export default function App() {
 }
 
 function MyStatusCard({
-  currentStatus, currentDesc, currentText, remaining,
-  editStatus, editMsg, editDuration, editUntil,
+  currentStatus, currentReason, currentSource, currentDesc, currentText, remaining,
+  editStatus, editMsg, editDuration, editUntil, editReason, editCustomText,
   onStatusSelect, onMsgChange, onDurationChange, onUntilChange,
+  onReasonChange, onCustomTextChange,
   onSave, onClear, busy,
   editOpen, onEditOpen, onEditClose,
 }) {
@@ -692,8 +759,14 @@ function MyStatusCard({
             </span>
             {remaining && <span className="oc-status-remaining">{remaining}</span>}
           </div>
+          {currentReason && <div className="oc-status-reason-badge">{currentReason}</div>}
           {currentDesc && <div className="oc-status-desc">{currentDesc}</div>}
           {currentText && <div className="oc-status-current-msg">{currentText}</div>}
+          {currentSource && currentSource !== 'self' && (
+            <div className="oc-status-source-badge">
+              {currentSource === 'host' ? '🔒 Host set' : currentSource}
+            </div>
+          )}
         </div>
         <button className="oc-status-edit-btn" onClick={editOpen ? onEditClose : onEditOpen}>
           {editOpen ? 'Đóng chỉnh sửa' : 'Chỉnh sửa'}
@@ -703,7 +776,7 @@ function MyStatusCard({
       {editOpen && (
         <div className="oc-status-editor">
           <div className="oc-status-choices">
-            {['available', 'busy', 'focus'].map((s) => {
+            {['available', 'busy', 'focus', 'do_not_disturb'].map((s) => {
               const m = getStatusMeta(s);
               return (
                 <button
@@ -719,6 +792,26 @@ function MyStatusCard({
           <div className="oc-status-desc">
             {STATUS_DESCRIPTIONS[editStatus] || ''}
           </div>
+
+          {editStatus !== 'available' && REASON_OPTIONS[editStatus] && (
+            <>
+              <label className="oc-label">Lý do</label>
+              <Select
+                value={editReason || REASON_OPTIONS[editStatus][0].value}
+                onChange={onReasonChange}
+                options={REASON_OPTIONS[editStatus]}
+              />
+              {editReason === 'custom' && (
+                <input
+                  className="mushy-input"
+                  value={editCustomText}
+                  maxLength={60}
+                  onChange={(e) => onCustomTextChange(e.target.value)}
+                  placeholder="VD: Client meeting, Code review… (tối đa 60 ký tự)"
+                />
+              )}
+            </>
+          )}
 
           <label className="oc-label">Tin nhắn (tuỳ chọn)</label>
           <textarea
@@ -862,10 +955,12 @@ function SquadNode({ squad, depth, childrenOf, membersOf, peopleMap, totals,
             {mem.map((r) => {
               const p = peopleMap[r.user_id];
               const st = allocStatus(totals[r.user_id] || 0);
-              const statusInfo = statusByUser[r.user_id] || { status: 'available', message: null, untilMs: null };
+              const statusInfo = statusByUser[r.user_id] || { status: 'available', message: null, untilMs: null, reason: null, source: 'self', customReasonText: null };
               const statusMeta = getStatusMeta(statusInfo.status);
               const statusDesc = STATUS_DESCRIPTIONS[statusInfo.status] || '';
-              const statusText = statusInfo.message || statusDesc;
+              const reasonText = reasonDisplay(statusInfo.reason, statusInfo.customReasonText);
+              const statusText = statusInfo.message || reasonText || statusDesc;
+              const isHostSet = statusInfo.source === 'host';
               const remain = formatRemaining(statusInfo.untilMs, nowTick);
               const mine = r.user_id === ctx.userId;
               return (
@@ -888,6 +983,7 @@ function SquadNode({ squad, depth, childrenOf, membersOf, peopleMap, totals,
                       <span className={`oc-status-pill oc-status-pill--${statusInfo.status}`}>
                         <span className="oc-status-dot" />{statusMeta.label}
                       </span>
+                      {isHostSet && <span className="oc-host-badge">Host set</span>}
                       <span className="oc-status-msg">
                         {statusText}{remain ? ` · ${remain}` : ''}
                       </span>
@@ -1384,11 +1480,13 @@ function RequestJoin({ squad, positionOptions, run, close }) {
 // lưu). Tương lai: email, chat duhat… (đang để disabled "sắp có").
 function PersonActions({ person, close, dialog, statusByUser, nowTick }) {
   const phone = person?.work_phone && person.work_phone.trim();
-  const info = statusByUser?.[person?.user_id] || { status: 'available', message: null, untilMs: null };
+  const info = statusByUser?.[person?.user_id] || { status: 'available', message: null, untilMs: null, reason: null, source: 'self', customReasonText: null };
   const meta = getStatusMeta(info.status);
   const remain = formatRemaining(info.untilMs, nowTick);
   const msg = statusMessage(info.status, info.message);
-  const copyText = msg ? `${meta.label}: ${msg}${remain ? ` (${remain})` : ''}` : meta.label;
+  const reasonText = reasonDisplay(info.reason, info.customReasonText);
+  const displayText = msg || reasonText || '';
+  const copyText = displayText ? `${meta.label}: ${displayText}${remain ? ` (${remain})` : ''}` : meta.label;
 
   async function copyStatus() {
     try {
@@ -1407,6 +1505,7 @@ function PersonActions({ person, close, dialog, statusByUser, nowTick }) {
         <span className={`oc-status-pill oc-status-pill--${info.status}`}>
           <span className="oc-status-dot" />{meta.label}
         </span>
+        {reasonText && <div className="oc-status-reason-badge">{reasonText}</div>}
         {msg && <div className="oc-status-current-msg">{msg}</div>}
         {remain && <div className="oc-status-remaining">{remain}</div>}
       </div>

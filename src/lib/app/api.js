@@ -63,12 +63,14 @@ export const api = {
   decideMembership: (p_req, p_approve) =>
     call('decide_membership', { p_req, p_approve }),
   cancelMyRequest: (p_req) => call('cancel_my_request', { p_req }),
-  setMyStatus: (p_group_id, p_status, p_message, p_until) =>
+  setMyStatus: (p_group_id, p_status, p_message, p_until, p_reason, p_custom_reason_text) =>
     call('set_my_status', {
       p_group_id,
       p_status,
       p_message: p_message || null,
       p_until: p_until || null,
+      p_reason: p_reason || null,
+      p_custom_reason_text: p_custom_reason_text || null,
     }),
   clearMyStatus: (p_group_id) => call('clear_my_status', { p_group_id }),
 };

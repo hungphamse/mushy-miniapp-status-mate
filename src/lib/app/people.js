@@ -102,11 +102,13 @@ export async function listGroupPeople(groupId) {
   } catch { /* RPC chưa apply hoặc lỗi — skip */ }
 
   // 5. Status-Mate (member_statuses) — optional, fallback nếu chưa apply mig.
+  //    Mig 012 thêm reason, source, custom_reason_text.
+  //    Supabase trả { data: null, error } nếu column chưa có — if (!sErr) guard bắt.
   const statusMap = {};
   try {
     const { data: statuses, error: sErr } = await db
       .from('member_statuses')
-      .select('user_id, status, message, status_until, updated_at')
+      .select('user_id, status, message, status_until, reason, source, custom_reason_text, updated_at')
       .eq('org_group_id', groupId);
     if (!sErr) {
       for (const s of statuses || []) {
@@ -114,6 +116,9 @@ export async function listGroupPeople(groupId) {
           status: s.status,
           message: s.message,
           status_until: s.status_until,
+          reason: s.reason ?? null,
+          source: s.source ?? 'self',
+          custom_reason_text: s.custom_reason_text ?? null,
           updated_at: s.updated_at,
         };
       }
@@ -136,6 +141,9 @@ export async function listGroupPeople(groupId) {
       status: st.status ?? null,
       status_message: st.message ?? null,
       status_until: st.status_until ?? null,
+      status_reason: st.reason ?? null,
+      status_source: st.source ?? 'self',
+      status_custom_reason: st.custom_reason_text ?? null,
       status_updated_at: st.updated_at ?? null,
     };
   });
