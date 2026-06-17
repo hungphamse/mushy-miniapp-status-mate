@@ -375,7 +375,7 @@ export default function App() {
         untilMs: norm.untilMs,
         updatedAt: p.status_updated_at || null,
         reason: norm.expired ? null : (p.status_reason || null),
-        source: p.status_source || 'self',
+        source: norm.expired ? 'self' : (p.status_source || 'self'),
         customReasonText: norm.expired ? null : (p.status_custom_reason || null),
         meetingRoomId: norm.expired ? null : (p.meeting_room_id || null),
       };
@@ -448,9 +448,20 @@ export default function App() {
   const myStatusDesc = STATUS_DESCRIPTIONS[myStatusInfo.status] || '';
   const myStatusText = myStatusInfo.message || '';
   const myStatusReasDisplay = reasonDisplay(myStatusInfo.reason, myStatusInfo.customReasonText);
+  const myStatusLockedByMeeting = myStatusInfo.status === 'in_meeting';
+
+  useEffect(() => {
+    if (!myStatusLockedByMeeting) return;
+    setMyStatusDirty(false);
+    setMyStatusEditOpen(false);
+  }, [myStatusLockedByMeeting]);
 
   const saveMyStatus = useCallback(async () => {
     if (!activeGroupId) return;
+    if (myStatusLockedByMeeting) {
+      dialog.error('Đang trong cuộc họp', 'Host cần kết thúc phòng họp để bạn chỉnh trạng thái.');
+      return;
+    }
     let until = null;
     if (myStatusDuration === 'custom') {
       until = fromLocalInputValue(myStatusUntil);
@@ -473,10 +484,14 @@ export default function App() {
     } finally {
       setMyStatusBusy(false);
     }
-  }, [activeGroupId, myStatus, myStatusMsg, myStatusDuration, myStatusUntil, myStatusReason, myStatusCustomText, dialog, reloadPeople]);
+  }, [activeGroupId, myStatus, myStatusMsg, myStatusDuration, myStatusUntil, myStatusReason, myStatusCustomText, myStatusLockedByMeeting, dialog, reloadPeople]);
 
   const clearMyStatus = useCallback(async () => {
     if (!activeGroupId) return;
+    if (myStatusLockedByMeeting) {
+      dialog.error('Đang trong cuộc họp', 'Host cần kết thúc phòng họp để khôi phục trạng thái.');
+      return;
+    }
     setMyStatusBusy(true);
     try {
       await api.clearMyStatus(activeGroupId);
@@ -494,7 +509,7 @@ export default function App() {
     } finally {
       setMyStatusBusy(false);
     }
-  }, [activeGroupId, dialog, reloadPeople]);
+  }, [activeGroupId, myStatusLockedByMeeting, dialog, reloadPeople]);
 
   if (ctxErr) {
     return <div className="mushy-page"><div className="mushy-card">
@@ -585,9 +600,16 @@ export default function App() {
             editUntil={myStatusUntil}
             editReason={myStatusReason}
             editCustomText={myStatusCustomText}
+            lockedByMeeting={myStatusLockedByMeeting}
             busy={myStatusBusy}
             editOpen={myStatusEditOpen}
-            onEditOpen={() => setMyStatusEditOpen(true)}
+            onEditOpen={() => {
+              if (myStatusLockedByMeeting) {
+                dialog.error('Đang trong cuộc họp', 'Host cần kết thúc phòng họp để bạn chỉnh trạng thái.');
+                return;
+              }
+              setMyStatusEditOpen(true);
+            }}
             onEditClose={() => setMyStatusEditOpen(false)}
             onStatusSelect={(value) => {
               setMyStatusDirty(true);
@@ -779,9 +801,11 @@ function MyStatusCard({
   onStatusSelect, onMsgChange, onDurationChange, onUntilChange,
   onReasonChange, onCustomTextChange,
   onSave, onClear, busy,
-  editOpen, onEditOpen, onEditClose,
+  editOpen, onEditOpen, onEditClose, lockedByMeeting,
 }) {
   const meta = getStatusMeta(currentStatus);
+  const canEdit = !lockedByMeeting;
+  const showSourceBadge = currentSource === 'host' && currentStatus !== 'in_meeting';
   return (
     <div className="oc-status-card">
       <div className="oc-status-card-head">
@@ -796,18 +820,23 @@ function MyStatusCard({
           {currentReason && <div className="oc-status-reason-badge">{currentReason}</div>}
           {currentDesc && <div className="oc-status-desc">{currentDesc}</div>}
           {currentText && <div className="oc-status-current-msg">{currentText}</div>}
-          {currentSource && currentSource !== 'self' && (
+          {showSourceBadge && (
             <div className="oc-status-source-badge">
-              {currentSource === 'host' ? '🔒 Host set' : currentSource}
+              Host set
+            </div>
+          )}
+          {lockedByMeeting && (
+            <div className="oc-status-lock-note">
+              Host cần kết thúc phòng họp để khôi phục trạng thái.
             </div>
           )}
         </div>
-        <button className="oc-status-edit-btn" onClick={editOpen ? onEditClose : onEditOpen}>
-          {editOpen ? 'Đóng chỉnh sửa' : 'Chỉnh sửa'}
+        <button className="oc-status-edit-btn" onClick={editOpen ? onEditClose : onEditOpen} disabled={!canEdit}>
+          {lockedByMeeting ? 'Đang họp' : editOpen ? 'Đóng chỉnh sửa' : 'Chỉnh sửa'}
         </button>
       </div>
 
-      {editOpen && (
+      {editOpen && canEdit && (
         <div className="oc-status-editor">
           <div className="oc-status-choices">
             {['available', 'busy', 'focus', 'do_not_disturb'].map((s) => {
@@ -981,6 +1010,15 @@ function MeetingControlPanel({
     return userIds.length > 0 && userIds.every((userId) => nextStatusByUser.get(userId) === expectedStatus);
   };
 
+  const resolveMeetingStatusUntil = () => {
+    const plannedMs = activeRoom?.planned_end_at ? new Date(activeRoom.planned_end_at).getTime() : null;
+    if (Number.isFinite(plannedMs) && plannedMs > Date.now()) return activeRoom.planned_end_at;
+    const fallback = resolveMeetingUntil(duration, customUntil);
+    const fallbackMs = fallback ? new Date(fallback).getTime() : null;
+    if (Number.isFinite(fallbackMs) && fallbackMs > Date.now()) return fallback;
+    return new Date(Date.now() + 30 * 60000).toISOString();
+  };
+
   const run = async (fn, success, verify) => {
     if (busy) return null;
     setBusy(true);
@@ -1037,8 +1075,9 @@ function MeetingControlPanel({
       dialog.error('Chưa có người tham gia', 'Thêm thành viên vào phòng trước khi áp dụng trạng thái họp.');
       return;
     }
+    const until = resolveMeetingStatusUntil();
     await run(
-      () => api.applyMeetingMode(roomId, null, activeRoom.planned_end_at || resolveMeetingUntil(duration, customUntil)),
+      () => api.applyMeetingMode(roomId, null, until),
       'Đã áp dụng In Meeting cho mọi người trong phòng.',
       (latestPeople) => peopleHaveStatus(latestPeople, targetIds, 'in_meeting'),
     );
@@ -1047,13 +1086,14 @@ function MeetingControlPanel({
   const setOne = async () => {
     if (!roomId || !targetUserId) return;
     const selectedUserId = targetUserId;
+    const until = resolveMeetingStatusUntil();
     await run(
       () => api.setStatusForMember(
         roomId,
         selectedUserId,
         'in_meeting',
         activeRoom?.title || 'In meeting',
-        activeRoom?.planned_end_at || resolveMeetingUntil(duration, customUntil),
+        until,
       ),
       'Đã set In Meeting cho thành viên.',
       (latestPeople) => peopleHaveStatus(latestPeople, [selectedUserId], 'in_meeting'),
