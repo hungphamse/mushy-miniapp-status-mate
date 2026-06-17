@@ -1,6 +1,6 @@
 # Org Chart — Mushy mini-app
 
-Mini-app tổ chức nhân sự theo squad/dự án trong hệ Mushy. Slug `org-chart` → schema `app_org_chart`.
+Mini-app tổ chức nhân sự theo squad/dự án trong hệ Mushy. Slug `status-mate` → schema `app_status_mate`.
 
 > 📐 **Spec đã chốt** — đọc trước khi code:
 > - [`_docs/requirements.md`](./_docs/requirements.md) — yêu cầu đã xác nhận (chốt 2026-05-17, sếp Huy / anhdqvn)

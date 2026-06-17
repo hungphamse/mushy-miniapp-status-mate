@@ -13,10 +13,11 @@ import OrgGroupSettingsModal from './components/OrgGroupSettingsModal.jsx';
 import { listGroupPeople, personLabel } from './lib/app/people.js';
 import { listOrgGroups, createOrgGroup } from './lib/app/org-groups.js';
 import {
-  fetchOrgChart, api, slugify, allocationTotals, allocStatus,
+  fetchOrgChart, listMeetingRooms, listMeetingParticipants, api, slugify, allocationTotals, allocStatus,
   describeEvent, timeAgo, formatVNPhone,
 } from './lib/app/api.js';
 import './App.css';
+import { log } from './lib/app/logger.js';
 
 const GROUP_REMEMBER_KEY = 'orgchart:last_group_id';
 
@@ -25,26 +26,33 @@ registerLocale('vi', vi);
 const OTHER = '__other__';
 
 const STATUS_META = {
-  available: { label: 'Available', tone: 'ok' },
-  busy: { label: 'Busy', tone: 'warn' },
-  focus: { label: 'Focus', tone: 'err' },
+  available:      { label: 'Available',      tone: 'ok'  },
+  busy:           { label: 'Busy',           tone: 'warn' },
+  focus:          { label: 'Focus',          tone: 'err' },
+  in_meeting:     { label: 'In Meeting',     tone: 'meeting' },
+  do_not_disturb: { label: 'Do Not Disturb', tone: 'dnd' },
 };
 
 const STATUS_DESCRIPTIONS = {
-  available: 'Có thể trao đổi',
-  busy: 'Phản hồi sau 30 phút',
-  focus: 'Chỉ ping nếu urgent',
+  available:      'Có thể trao đổi',
+  busy:           'Không thể phản hồi ngay',
+  focus:          'Chỉ ping nếu urgent',
+  in_meeting:     'Đang trong cuộc họp',
+  do_not_disturb: 'Không làm phiền — chỉ liên hệ khẩn cấp',
 };
 
 const STATUS_FILTERS = [
-  { value: 'all', label: 'Tất cả' },
-  { value: 'available', label: 'Available' },
-  { value: 'busy', label: 'Busy' },
-  { value: 'focus', label: 'Focus' },
+  { value: 'all',            label: 'Tất cả'         },
+  { value: 'available',      label: 'Available'      },
+  { value: 'busy',           label: 'Busy'           },
+  { value: 'focus',          label: 'Focus'          },
+  { value: 'in_meeting',     label: 'In Meeting'     },
+  { value: 'do_not_disturb', label: 'Do Not Disturb' },
 ];
 
 const STATUS_DURATION_OPTIONS = [
   { value: 'none', label: 'Không giới hạn' },
+  { value: '25', label: '25 phút' },
   { value: '30', label: '30 phút' },
   { value: '45', label: '45 phút' },
   { value: '60', label: '60 phút' },
@@ -57,6 +65,52 @@ const STATUS_DURATION_OPTIONS = [
   { value: '1440', label: '24 giờ' },
   { value: 'custom', label: 'Chọn thời điểm kết thúc' },
 ];
+
+const MEETING_DURATION_OPTIONS = STATUS_DURATION_OPTIONS.filter((o) => o.value !== 'none');
+
+const MEETING_STATUS_LABELS = {
+  scheduled: 'Đã lên lịch',
+  active: 'Đang họp',
+  ended: 'Đã kết thúc',
+  empty: 'Chưa có phòng',
+};
+
+// Reason → human-readable label (Team View + PersonActions)
+const REASON_LABELS = {
+  manual_focus: 'Deep work',
+  manual_busy:  'Bận việc',
+  meeting_room: 'In Meeting',
+  deadline:     'Deadline',
+  break:        'Break',
+};
+
+// Dropdown options trong editor theo từng status
+const REASON_OPTIONS = {
+  focus: [
+    { value: 'manual_focus', label: 'Deep work' },
+    { value: 'deadline',     label: 'Deadline' },
+    { value: 'custom',       label: '✎ Tự nhập…' },
+  ],
+  busy: [
+    { value: 'manual_busy',  label: 'Bận việc' },
+    { value: 'deadline',     label: 'Deadline' },
+    { value: 'break',        label: 'Break' },
+    { value: 'custom',       label: '✎ Tự nhập…' },
+  ],
+  do_not_disturb: [
+    { value: 'manual_focus', label: 'Deep work' },
+    { value: 'deadline',     label: 'Deadline' },
+    { value: 'break',        label: 'Break' },
+    { value: 'custom',       label: '✎ Tự nhập…' },
+  ],
+};
+
+// reason + customReasonText → chuỗi hiển thị. null = không hiện.
+function reasonDisplay(reason, customReasonText) {
+  if (!reason) return null;
+  if (reason === 'custom') return customReasonText?.slice(0, 60) || null;
+  return REASON_LABELS[reason] || null;
+}
 
 function getStatusMeta(status) {
   return STATUS_META[status] || STATUS_META.available;
@@ -121,6 +175,27 @@ function toDateFromLocalInput(value) {
   return d;
 }
 
+function parseJwtPayload(token) {
+  if (!token || typeof token !== 'string') return null;
+  const parts = token.split('.');
+  if (parts.length < 2) return null;
+  try {
+    const base64Url = parts[1];
+    const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
+    const padded = base64.padEnd(Math.ceil(base64.length / 4) * 4, '=');
+    return JSON.parse(atob(padded));
+  } catch {
+    return null;
+  }
+}
+
+function isExpiredJwt(token, nowMs = Date.now()) {
+  const payload = parseJwtPayload(token);
+  const exp = Number(payload?.exp);
+  if (!Number.isFinite(exp)) return false;
+  return exp * 1000 <= nowMs;
+}
+
 export default function App() {
   const dialog = useDialog();
   const [ctx, setCtx] = useState(null);
@@ -137,6 +212,8 @@ export default function App() {
   const [myStatusBusy, setMyStatusBusy] = useState(false);
   const [myStatusDirty, setMyStatusDirty] = useState(false);
   const [myStatusEditOpen, setMyStatusEditOpen] = useState(false);
+  const [myStatusReason, setMyStatusReason] = useState(null);
+  const [myStatusCustomText, setMyStatusCustomText] = useState('');
   const [modal, setModal] = useState(null); // { kind, ... }
   // Org groups ws đang subscribe + group đang active.
   const [groups, setGroups] = useState(null);  // null = chưa load
@@ -155,7 +232,21 @@ export default function App() {
   const collapseAll = useCallback(() => setOpenMap({}), []);
 
   useEffect(() => {
-    try { setCtx(getContext()); } catch (e) { setCtxErr(e.message); }
+    try {
+        const nextCtx = getContext();
+        log.info('ENV: ', import.meta.env.DEV ? 'development' : 'production');
+        log.info('Context: ', nextCtx ? 'loaded' : 'null');
+        if (nextCtx?.token) {
+        	log.info('Validate until: ', parseJwtPayload(nextCtx.token)?.exp ? new Date(parseJwtPayload(nextCtx.token).exp * 1000) : 'invalid token');
+        }
+      if (import.meta.env.DEV && nextCtx?.token && isExpiredJwt(nextCtx.token)) {
+        setCtxErr('VITE_DEV_TOKEN đã hết hạn. Chạy `npm run dev:token` để đăng nhập lại rồi reload trang.');
+        return;
+      }
+      setCtx(nextCtx);
+    } catch (e) {
+      setCtxErr(e.message);
+    }
   }, []);
 
   useEffect(() => {
@@ -228,7 +319,15 @@ export default function App() {
     }
   }, [activeGroupId, dialog]);
 
-  useEffect(() => { if (activeGroupId) reload(); }, [activeGroupId, reload]);
+  useEffect(() => {
+    if (activeGroupId) {
+      reload();
+    } else if (groups !== null) {
+      // Groups have loaded but none is active (empty workspace) — nothing to
+      // fetch, so clear the loading state that was set on mount.
+      setLoading(false);
+    }
+  }, [activeGroupId, groups, reload]);
 
   // Realtime subscribe theo workspace_id (PostgREST realtime filter chỉ
   // support eq trên column thật). Ta vẫn subscribe theo ctx.workspaceId
@@ -275,6 +374,10 @@ export default function App() {
         message: norm.expired ? null : (p.status_message || null),
         untilMs: norm.untilMs,
         updatedAt: p.status_updated_at || null,
+        reason: norm.expired ? null : (p.status_reason || null),
+        source: norm.expired ? 'self' : (p.status_source || 'self'),
+        customReasonText: norm.expired ? null : (p.status_custom_reason || null),
+        meetingRoomId: norm.expired ? null : (p.meeting_room_id || null),
       };
     }
     return map;
@@ -287,6 +390,8 @@ export default function App() {
     const status = info?.status || 'available';
     setMyStatus(status);
     setMyStatusMsg(info?.message || '');
+    setMyStatusReason(info?.reason || null);
+    setMyStatusCustomText(info?.customReasonText || '');
     if (info?.untilMs) {
       setMyStatusDuration('custom');
       setMyStatusUntil(toLocalInputValue(new Date(info.untilMs).toISOString()));
@@ -338,13 +443,25 @@ export default function App() {
 
   const myTotal = ctx ? (totals[ctx.userId] || 0) : 0;
   const myInAny = ctx && data.members.some((r) => r.user_id === ctx.userId);
-  const myStatusInfo = ctx ? (statusByUser[ctx.userId] || { status: 'available' }) : { status: 'available' };
+  const myStatusInfo = ctx ? (statusByUser[ctx.userId] || { status: 'available', source: 'self' }) : { status: 'available', source: 'self' };
   const myStatusRemain = formatRemainingRounded(myStatusInfo.untilMs, nowTick);
   const myStatusDesc = STATUS_DESCRIPTIONS[myStatusInfo.status] || '';
   const myStatusText = myStatusInfo.message || '';
+  const myStatusReasDisplay = reasonDisplay(myStatusInfo.reason, myStatusInfo.customReasonText);
+  const myStatusLockedByMeeting = myStatusInfo.status === 'in_meeting';
+
+  useEffect(() => {
+    if (!myStatusLockedByMeeting) return;
+    setMyStatusDirty(false);
+    setMyStatusEditOpen(false);
+  }, [myStatusLockedByMeeting]);
 
   const saveMyStatus = useCallback(async () => {
     if (!activeGroupId) return;
+    if (myStatusLockedByMeeting) {
+      dialog.error('Đang trong cuộc họp', 'Host cần kết thúc phòng họp để bạn chỉnh trạng thái.');
+      return;
+    }
     let until = null;
     if (myStatusDuration === 'custom') {
       until = fromLocalInputValue(myStatusUntil);
@@ -354,9 +471,11 @@ export default function App() {
         until = new Date(Date.now() + min * 60000).toISOString();
       }
     }
+    const reason = myStatus === 'available' ? null : (myStatusReason || null);
+    const customText = reason === 'custom' ? (myStatusCustomText.trim() || null) : null;
     setMyStatusBusy(true);
     try {
-      await api.setMyStatus(activeGroupId, myStatus, myStatusMsg.trim() || null, until);
+      await api.setMyStatus(activeGroupId, myStatus, myStatusMsg.trim() || null, until, reason, customText);
       setMyStatusDirty(false);
       setMyStatusEditOpen(false);
       await reloadPeople();
@@ -365,10 +484,14 @@ export default function App() {
     } finally {
       setMyStatusBusy(false);
     }
-  }, [activeGroupId, myStatus, myStatusMsg, myStatusDuration, myStatusUntil, dialog, reloadPeople]);
+  }, [activeGroupId, myStatus, myStatusMsg, myStatusDuration, myStatusUntil, myStatusReason, myStatusCustomText, myStatusLockedByMeeting, dialog, reloadPeople]);
 
   const clearMyStatus = useCallback(async () => {
     if (!activeGroupId) return;
+    if (myStatusLockedByMeeting) {
+      dialog.error('Đang trong cuộc họp', 'Host cần kết thúc phòng họp để khôi phục trạng thái.');
+      return;
+    }
     setMyStatusBusy(true);
     try {
       await api.clearMyStatus(activeGroupId);
@@ -377,6 +500,8 @@ export default function App() {
       setMyStatusMsg('');
       setMyStatusDuration('none');
       setMyStatusUntil('');
+      setMyStatusReason(null);
+      setMyStatusCustomText('');
       setMyStatusEditOpen(false);
       await reloadPeople();
     } catch (e) {
@@ -384,7 +509,7 @@ export default function App() {
     } finally {
       setMyStatusBusy(false);
     }
-  }, [activeGroupId, dialog, reloadPeople]);
+  }, [activeGroupId, myStatusLockedByMeeting, dialog, reloadPeople]);
 
   if (ctxErr) {
     return <div className="mushy-page"><div className="mushy-card">
@@ -461,38 +586,71 @@ export default function App() {
       )}
 
       {activeGroupId && (
-        <MyStatusCard
-          currentStatus={myStatusInfo.status}
-          currentDesc={myStatusDesc}
-          currentText={myStatusText}
-          remaining={myStatusRemain}
-          editStatus={myStatus}
-          editMsg={myStatusMsg}
-          editDuration={myStatusDuration}
-          editUntil={myStatusUntil}
-          busy={myStatusBusy}
-          editOpen={myStatusEditOpen}
-          onEditOpen={() => setMyStatusEditOpen(true)}
-          onEditClose={() => setMyStatusEditOpen(false)}
-          onStatusSelect={(value) => {
-            setMyStatusDirty(true);
-            setMyStatus(value);
-          }}
-          onMsgChange={(value) => { setMyStatusDirty(true); setMyStatusMsg(value); }}
-          onDurationChange={(value) => {
-            setMyStatusDirty(true);
-            setMyStatusDuration(value);
-            if (value === 'custom') {
-              const iso = new Date(Date.now() + 30 * 60000).toISOString();
-              setMyStatusUntil(toLocalInputValue(iso));
-            } else {
-              setMyStatusUntil('');
-            }
-          }}
-          onUntilChange={(value) => { setMyStatusDirty(true); setMyStatusUntil(value); }}
-          onSave={saveMyStatus}
-          onClear={clearMyStatus}
-        />
+        <>
+          <MyStatusCard
+            currentStatus={myStatusInfo.status}
+            currentReason={myStatusReasDisplay}
+            currentSource={myStatusInfo.source}
+            currentDesc={myStatusDesc}
+            currentText={myStatusText}
+            remaining={myStatusRemain}
+            editStatus={myStatus}
+            editMsg={myStatusMsg}
+            editDuration={myStatusDuration}
+            editUntil={myStatusUntil}
+            editReason={myStatusReason}
+            editCustomText={myStatusCustomText}
+            lockedByMeeting={myStatusLockedByMeeting}
+            busy={myStatusBusy}
+            editOpen={myStatusEditOpen}
+            onEditOpen={() => {
+              if (myStatusLockedByMeeting) {
+                dialog.error('Đang trong cuộc họp', 'Host cần kết thúc phòng họp để bạn chỉnh trạng thái.');
+                return;
+              }
+              setMyStatusEditOpen(true);
+            }}
+            onEditClose={() => setMyStatusEditOpen(false)}
+            onStatusSelect={(value) => {
+              setMyStatusDirty(true);
+              setMyStatus(value);
+              const opts = REASON_OPTIONS[value];
+              const defaultReason = opts?.[0]?.value ?? null;
+              setMyStatusReason(defaultReason);
+              if (defaultReason !== 'custom') setMyStatusCustomText('');
+            }}
+            onMsgChange={(value) => { setMyStatusDirty(true); setMyStatusMsg(value); }}
+            onReasonChange={(value) => {
+              setMyStatusDirty(true);
+              setMyStatusReason(value);
+              if (value !== 'custom') setMyStatusCustomText('');
+            }}
+            onCustomTextChange={(value) => { setMyStatusDirty(true); setMyStatusCustomText(value); }}
+            onDurationChange={(value) => {
+              setMyStatusDirty(true);
+              setMyStatusDuration(value);
+              if (value === 'custom') {
+                const iso = new Date(Date.now() + 30 * 60000).toISOString();
+                setMyStatusUntil(toLocalInputValue(iso));
+              } else {
+                setMyStatusUntil('');
+              }
+            }}
+            onUntilChange={(value) => { setMyStatusDirty(true); setMyStatusUntil(value); }}
+            onSave={saveMyStatus}
+            onClear={clearMyStatus}
+          />
+          <MeetingControlPanel
+            activeGroupId={activeGroupId}
+            ctx={ctx}
+            isAdmin={isAdmin}
+            people={people}
+            statusByUser={statusByUser}
+            nowTick={nowTick}
+            dialog={dialog}
+            reloadPeople={reloadPeople}
+          />
+        </>
       )}
 
       <div className="oc-filter-bar">
@@ -583,6 +741,14 @@ export default function App() {
             <span className="oc-status-pill oc-status-pill--focus"><span className="oc-status-dot" />Focus</span>
             <span className="oc-legend-text">Đang tập trung, chỉ ping nếu cần thiết</span>
           </div>
+          <div className="oc-legend-item">
+            <span className="oc-status-pill oc-status-pill--in_meeting"><span className="oc-status-dot" />In Meeting</span>
+            <span className="oc-legend-text">Đang trong cuộc họp, host có thể set/restore</span>
+          </div>
+          <div className="oc-legend-item">
+            <span className="oc-status-pill oc-status-pill--do_not_disturb"><span className="oc-status-dot" />Do Not Disturb</span>
+            <span className="oc-legend-text">Không làm phiền, chỉ liên hệ khi khẩn cấp</span>
+          </div>
         </div>
       </div>
 
@@ -630,13 +796,16 @@ export default function App() {
 }
 
 function MyStatusCard({
-  currentStatus, currentDesc, currentText, remaining,
-  editStatus, editMsg, editDuration, editUntil,
+  currentStatus, currentReason, currentSource, currentDesc, currentText, remaining,
+  editStatus, editMsg, editDuration, editUntil, editReason, editCustomText,
   onStatusSelect, onMsgChange, onDurationChange, onUntilChange,
+  onReasonChange, onCustomTextChange,
   onSave, onClear, busy,
-  editOpen, onEditOpen, onEditClose,
+  editOpen, onEditOpen, onEditClose, lockedByMeeting,
 }) {
   const meta = getStatusMeta(currentStatus);
+  const canEdit = !lockedByMeeting;
+  const showSourceBadge = currentSource === 'host' && currentStatus !== 'in_meeting';
   return (
     <div className="oc-status-card">
       <div className="oc-status-card-head">
@@ -648,18 +817,29 @@ function MyStatusCard({
             </span>
             {remaining && <span className="oc-status-remaining">{remaining}</span>}
           </div>
+          {currentReason && <div className="oc-status-reason-badge">{currentReason}</div>}
           {currentDesc && <div className="oc-status-desc">{currentDesc}</div>}
           {currentText && <div className="oc-status-current-msg">{currentText}</div>}
+          {showSourceBadge && (
+            <div className="oc-status-source-badge">
+              Host set
+            </div>
+          )}
+          {lockedByMeeting && (
+            <div className="oc-status-lock-note">
+              Host cần kết thúc phòng họp để khôi phục trạng thái.
+            </div>
+          )}
         </div>
-        <button className="oc-status-edit-btn" onClick={editOpen ? onEditClose : onEditOpen}>
-          {editOpen ? 'Đóng chỉnh sửa' : 'Chỉnh sửa'}
+        <button className="oc-status-edit-btn" onClick={editOpen ? onEditClose : onEditOpen} disabled={!canEdit}>
+          {lockedByMeeting ? 'Đang họp' : editOpen ? 'Đóng chỉnh sửa' : 'Chỉnh sửa'}
         </button>
       </div>
 
-      {editOpen && (
+      {editOpen && canEdit && (
         <div className="oc-status-editor">
           <div className="oc-status-choices">
-            {['available', 'busy', 'focus'].map((s) => {
+            {['available', 'busy', 'focus', 'do_not_disturb'].map((s) => {
               const m = getStatusMeta(s);
               return (
                 <button
@@ -675,6 +855,26 @@ function MyStatusCard({
           <div className="oc-status-desc">
             {STATUS_DESCRIPTIONS[editStatus] || ''}
           </div>
+
+          {editStatus !== 'available' && REASON_OPTIONS[editStatus] && (
+            <>
+              <label className="oc-label">Lý do</label>
+              <Select
+                value={editReason || REASON_OPTIONS[editStatus][0].value}
+                onChange={onReasonChange}
+                options={REASON_OPTIONS[editStatus]}
+              />
+              {editReason === 'custom' && (
+                <input
+                  className="mushy-input"
+                  value={editCustomText}
+                  maxLength={60}
+                  onChange={(e) => onCustomTextChange(e.target.value)}
+                  placeholder="VD: Client meeting, Code review… (tối đa 60 ký tự)"
+                />
+              )}
+            </>
+          )}
 
           <label className="oc-label">Tin nhắn (tuỳ chọn)</label>
           <textarea
@@ -722,6 +922,385 @@ function MyStatusCard({
   );
 }
 
+function resolveMeetingUntil(duration, customUntil) {
+  if (duration === 'custom') return fromLocalInputValue(customUntil);
+  const min = parseInt(duration, 10);
+  if (!Number.isFinite(min) || min <= 0) return null;
+  return new Date(Date.now() + min * 60000).toISOString();
+}
+
+function MeetingControlPanel({
+  activeGroupId, ctx, isAdmin, people, statusByUser, nowTick, dialog, reloadPeople,
+}) {
+  const [rooms, setRooms] = useState([]);
+  const [roomId, setRoomId] = useState('');
+  const [participants, setParticipants] = useState([]);
+  const [title, setTitle] = useState('');
+  const [duration, setDuration] = useState('30');
+  const [customUntil, setCustomUntil] = useState('');
+  const [participantUserId, setParticipantUserId] = useState('');
+  const [targetUserId, setTargetUserId] = useState('');
+  const [detailOpen, setDetailOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [backendReady, setBackendReady] = useState(true);
+
+  const loadRooms = useCallback(async (preferredId = '') => {
+    if (!activeGroupId) return;
+    try {
+      const nextRooms = await listMeetingRooms(activeGroupId);
+      setBackendReady(true);
+      setRooms(nextRooms);
+      setRoomId((prev) => {
+        if (preferredId && nextRooms.some((r) => r.id === preferredId)) return preferredId;
+        if (prev && nextRooms.some((r) => r.id === prev)) return prev;
+        return nextRooms.find((r) => r.status === 'active')?.id || nextRooms[0]?.id || '';
+      });
+    } catch (e) {
+      setBackendReady(false);
+      setRooms([]);
+      setParticipants([]);
+      setRoomId('');
+      setDetailOpen(false);
+    }
+  }, [activeGroupId]);
+
+  const loadParticipants = useCallback(async () => {
+    if (!roomId) {
+      setParticipants([]);
+      return;
+    }
+    try {
+      const nextParticipants = await listMeetingParticipants(roomId);
+      setParticipants(nextParticipants);
+    } catch {
+      setParticipants([]);
+    }
+  }, [roomId]);
+
+  useEffect(() => { loadRooms(); }, [loadRooms]);
+  useEffect(() => { loadParticipants(); }, [loadParticipants]);
+
+  const activeRoom = rooms.find((r) => r.id === roomId) || null;
+  const activeParticipants = participants.filter((p) => !p.left_at);
+  const participantIds = new Set(activeParticipants.map((p) => p.user_id));
+  const meParticipant = activeParticipants.find((p) => p.user_id === ctx?.userId);
+  const canManage = !!activeRoom && (
+    isAdmin || activeRoom.host_user_id === ctx?.userId || meParticipant?.role === 'co_host'
+  );
+  const availablePeople = people.filter((p) => !participantIds.has(p.user_id));
+  const roomOptions = rooms.map((r) => ({
+    value: r.id,
+    label: `${r.title || 'Meeting'} · ${MEETING_STATUS_LABELS[r.status] || r.status}`,
+  }));
+  const activeUntilMs = activeRoom?.planned_end_at
+    ? new Date(activeRoom.planned_end_at).getTime()
+    : null;
+  const roomRemaining = formatRemaining(activeUntilMs, nowTick);
+  const roomTitle = activeRoom?.title || 'Meeting';
+  const roomStateLabel = MEETING_STATUS_LABELS[activeRoom?.status || 'empty'] || activeRoom?.status || 'empty';
+
+  useEffect(() => {
+    if (!activeRoom) setDetailOpen(false);
+  }, [activeRoom]);
+
+  const peopleHaveStatus = (rows, userIds, expectedStatus) => {
+    const nextStatusByUser = new Map(
+      (rows || []).map((person) => [person.user_id, person.status || 'available']),
+    );
+    return userIds.length > 0 && userIds.every((userId) => nextStatusByUser.get(userId) === expectedStatus);
+  };
+
+  const resolveMeetingStatusUntil = () => {
+    const plannedMs = activeRoom?.planned_end_at ? new Date(activeRoom.planned_end_at).getTime() : null;
+    if (Number.isFinite(plannedMs) && plannedMs > Date.now()) return activeRoom.planned_end_at;
+    const fallback = resolveMeetingUntil(duration, customUntil);
+    const fallbackMs = fallback ? new Date(fallback).getTime() : null;
+    if (Number.isFinite(fallbackMs) && fallbackMs > Date.now()) return fallback;
+    return new Date(Date.now() + 30 * 60000).toISOString();
+  };
+
+  const run = async (fn, success, verify) => {
+    if (busy) return null;
+    setBusy(true);
+    try {
+      const result = await fn();
+      await loadRooms(result?.id || roomId);
+      await loadParticipants();
+      const latestPeople = await reloadPeople();
+      if (verify && !verify(latestPeople || [])) {
+        dialog.error(
+          'Status chưa đổi',
+          'Lệnh đã chạy nhưng dữ liệu đọc lại vẫn chưa chuyển sang In Meeting. Kiểm tra migration 013 trên Admin Portal đã được apply đúng bản mới nhất.',
+        );
+        return result;
+      }
+      if (success) dialog.success('Đã cập nhật', success);
+      return result;
+    } catch (e) {
+      dialog.error('Chế độ họp lỗi', e?.message || String(e));
+      return null;
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const createRoom = async () => {
+    const until = resolveMeetingUntil(duration, customUntil);
+    if (!until) {
+      dialog.error('Thiếu thời điểm kết thúc', 'Chọn thời lượng hợp lệ cho phòng họp.');
+      return;
+    }
+    const created = await run(
+      () => api.createMeetingRoom(activeGroupId, title.trim() || 'Meeting', until, []),
+      'Đã tạo phòng họp.',
+    );
+    if (created?.id) setRoomId(created.id);
+    setDetailOpen(false);
+    setTitle('');
+  };
+
+  const addParticipant = async () => {
+    if (!roomId || !participantUserId) return;
+    await run(
+      () => api.addMeetingParticipants(roomId, [participantUserId]),
+      'Đã thêm người tham gia.',
+    );
+    setParticipantUserId('');
+  };
+
+  const applyAll = async () => {
+    if (!roomId || activeRoom?.status !== 'active') return;
+    const targetIds = activeParticipants.map((p) => p.user_id);
+    if (targetIds.length === 0) {
+      dialog.error('Chưa có người tham gia', 'Thêm thành viên vào phòng trước khi áp dụng trạng thái họp.');
+      return;
+    }
+    const until = resolveMeetingStatusUntil();
+    await run(
+      () => api.applyMeetingMode(roomId, null, until),
+      'Đã áp dụng In Meeting cho mọi người trong phòng.',
+      (latestPeople) => peopleHaveStatus(latestPeople, targetIds, 'in_meeting'),
+    );
+  };
+
+  const setOne = async () => {
+    if (!roomId || !targetUserId) return;
+    const selectedUserId = targetUserId;
+    const until = resolveMeetingStatusUntil();
+    await run(
+      () => api.setStatusForMember(
+        roomId,
+        selectedUserId,
+        'in_meeting',
+        activeRoom?.title || 'In meeting',
+        until,
+      ),
+      'Đã set In Meeting cho thành viên.',
+      (latestPeople) => peopleHaveStatus(latestPeople, [selectedUserId], 'in_meeting'),
+    );
+    setTargetUserId('');
+  };
+
+  const restoreOne = async () => {
+    if (!roomId || !targetUserId) return;
+    await run(
+      () => api.restoreMeetingStatusForRoom(roomId, [targetUserId]),
+      'Đã khôi phục trạng thái của thành viên.',
+    );
+    setTargetUserId('');
+  };
+
+  const endRoom = async () => {
+    if (!roomId) return;
+    const ok = await dialog.confirm(
+      'Kết thúc phòng họp?',
+      'Trạng thái do host set sẽ được khôi phục về trạng thái trước cuộc họp.',
+      { confirmLabel: 'Kết thúc', cancelLabel: 'Huỷ' },
+    );
+    if (!ok) return;
+    await run(() => api.endMeetingRoom(roomId, true), 'Đã kết thúc phòng họp.');
+  };
+
+  if (detailOpen && activeRoom) {
+    return (
+      <div className="oc-meeting-panel oc-meeting-panel--detail">
+        <div className="oc-meeting-detail-head">
+          <button className="oc-back-btn" onClick={() => setDetailOpen(false)}>
+            ← Phòng
+          </button>
+          <div className="oc-meeting-detail-title">
+            <div className="oc-status-title">{roomTitle}</div>
+            <div className="oc-meeting-sub">
+              {activeParticipants.length} người tham gia{roomRemaining ? ` · ${roomRemaining}` : ''}
+            </div>
+          </div>
+          <span className={`oc-meeting-state oc-meeting-state--${activeRoom.status}`}>
+            {roomStateLabel}
+          </span>
+        </div>
+
+        <div className="oc-meeting-actions">
+          <button
+            className="mushy-btn mushy-btn--ghost"
+            disabled={busy || !canManage || activeRoom.status !== 'scheduled'}
+            onClick={() => run(() => api.startMeetingRoom(roomId), 'Phòng họp đã bắt đầu.')}
+          >
+            Bắt đầu
+          </button>
+          <button
+            className="mushy-btn mushy-btn--ghost"
+            disabled={busy || !canManage || activeRoom.status !== 'active' || activeParticipants.length === 0}
+            onClick={applyAll}
+          >
+            Áp dụng tất cả
+          </button>
+          <button
+            className="mushy-btn mushy-btn--ghost"
+            disabled={busy || !canManage || activeRoom.status === 'ended'}
+            onClick={endRoom}
+          >
+            Kết thúc & khôi phục
+          </button>
+        </div>
+
+        {canManage && (
+          <div className="oc-meeting-tools">
+            <div className="oc-meeting-tool">
+              <MemberSearchSelect
+                value={participantUserId}
+                onChange={setParticipantUserId}
+                people={availablePeople}
+                placeholder="Thêm người tham gia"
+              />
+              <button className="oc-mini-btn" disabled={busy || !participantUserId} onClick={addParticipant}>
+                +
+              </button>
+            </div>
+            <div className="oc-meeting-tool">
+              <MemberSearchSelect
+                value={targetUserId}
+                onChange={setTargetUserId}
+                people={people}
+                placeholder="Set/khôi phục thành viên"
+              />
+              <button className="oc-mini-btn" disabled={busy || !targetUserId} onClick={setOne}>
+                Set họp
+              </button>
+              <button className="oc-mini-btn" disabled={busy || !targetUserId} onClick={restoreOne}>
+                Khôi phục
+              </button>
+            </div>
+          </div>
+        )}
+
+        <div className="oc-meeting-participants">
+          {activeParticipants.length === 0 ? (
+            <div className="oc-meeting-empty">Chưa có người tham gia.</div>
+          ) : activeParticipants.map((p) => {
+            const person = people.find((x) => x.user_id === p.user_id);
+            const info = statusByUser[p.user_id] || { status: 'available', untilMs: null, source: 'self' };
+            const meta = getStatusMeta(info.status);
+            const remain = formatRemaining(info.untilMs, nowTick);
+            return (
+              <div key={p.user_id} className="oc-meeting-participant">
+                <div className="oc-meeting-person">
+                  <span>{personLabel(person)}</span>
+                  <small>{p.role === 'host' ? 'Host' : p.role === 'co_host' ? 'Co-host' : 'Thành viên'}</small>
+                </div>
+                <span className={`oc-status-pill oc-status-pill--${info.status}`}>
+                  <span className="oc-status-dot" />{meta.label}
+                </span>
+                {info.source === 'host' && <span className="oc-host-badge">Host set</span>}
+                {remain && <span className="oc-status-remaining">{remain}</span>}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="oc-meeting-panel">
+      <div className="oc-meeting-head">
+        <div>
+          <div className="oc-status-title">Chế độ họp</div>
+          <div className="oc-meeting-sub">
+            {activeRoom ? `${roomTitle} · ${roomStateLabel}` : 'Tạo hoặc mở nhanh phòng họp'}
+          </div>
+        </div>
+        <span className={`oc-meeting-state oc-meeting-state--${activeRoom?.status || 'empty'}`}>
+          {roomStateLabel}
+        </span>
+      </div>
+
+      {!backendReady ? (
+        <div className="oc-meeting-empty">Migration 013 chưa sẵn sàng trên database.</div>
+      ) : (
+        <>
+          <div className="oc-meeting-create">
+            <input
+              className="mushy-input"
+              value={title}
+              maxLength={100}
+              onChange={(e) => setTitle(e.target.value)}
+              placeholder="Tên phòng họp"
+            />
+            <Select
+              value={duration}
+              onChange={(value) => {
+                setDuration(value);
+                if (value === 'custom') {
+                  setCustomUntil(toLocalInputValue(new Date(Date.now() + 30 * 60000).toISOString()));
+                } else {
+                  setCustomUntil('');
+                }
+              }}
+              options={MEETING_DURATION_OPTIONS}
+              placeholder="Thời lượng"
+            />
+            {duration === 'custom' && (
+              <DatePicker
+                selected={toDateFromLocalInput(customUntil)}
+                onChange={(date) => setCustomUntil(date ? toLocalInputValue(date.toISOString()) : '')}
+                showTimeSelect
+                timeIntervals={15}
+                dateFormat="Pp"
+                timeCaption="Giờ"
+                locale="vi"
+                placeholderText="Kết thúc lúc"
+                className="mushy-input oc-datepicker"
+              />
+            )}
+            <button className="mushy-btn mushy-btn--primary" disabled={busy} onClick={createRoom}>
+              Tạo phòng
+            </button>
+          </div>
+
+          {rooms.length > 0 && (
+            <div className="oc-meeting-check">
+              <Select value={roomId} onChange={setRoomId} options={roomOptions} placeholder="Chọn phòng họp" />
+              {activeRoom && (
+                <div className="oc-meeting-summary">
+                  <div className="oc-meeting-summary-main">
+                    <strong>{roomTitle}</strong>
+                    <span>
+                      {roomStateLabel}{roomRemaining ? ` · ${roomRemaining}` : ''} · {activeParticipants.length} người
+                    </span>
+                  </div>
+                  <button className="mushy-btn mushy-btn--ghost" onClick={() => setDetailOpen(true)}>
+                    Chi tiết
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
 // ---------------- Squad node (đệ quy, collapsible) ----------------
 function SquadNode({ squad, depth, childrenOf, membersOf, peopleMap, totals,
   requestsBySquad, myPending, ctx, isAdmin, setModal, reload, dialog,
@@ -747,7 +1326,7 @@ function SquadNode({ squad, depth, childrenOf, membersOf, peopleMap, totals,
     const st = statusByUser[r.user_id]?.status || 'available';
     acc[st] = (acc[st] || 0) + 1;
     return acc;
-  }, { available: 0, busy: 0, focus: 0 });
+  }, { available: 0, busy: 0, focus: 0, in_meeting: 0, do_not_disturb: 0 });
 
   // Chạy RPC + reload, báo lỗi qua dialog. Không đóng gì (inline).
   const act = async (fn) => {
@@ -795,6 +1374,12 @@ function SquadNode({ squad, depth, childrenOf, membersOf, peopleMap, totals,
                       <span className="oc-status-count oc-status-count--focus">
                         <span className="oc-status-dot" />{statusCounts.focus}
                       </span>
+                      <span className="oc-status-count oc-status-count--in_meeting">
+                        <span className="oc-status-dot" />{statusCounts.in_meeting}
+                      </span>
+                      <span className="oc-status-count oc-status-count--do_not_disturb">
+                        <span className="oc-status-dot" />{statusCounts.do_not_disturb}
+                      </span>
                     </span>
                   )}
                 </span>
@@ -818,10 +1403,12 @@ function SquadNode({ squad, depth, childrenOf, membersOf, peopleMap, totals,
             {mem.map((r) => {
               const p = peopleMap[r.user_id];
               const st = allocStatus(totals[r.user_id] || 0);
-              const statusInfo = statusByUser[r.user_id] || { status: 'available', message: null, untilMs: null };
+              const statusInfo = statusByUser[r.user_id] || { status: 'available', message: null, untilMs: null, reason: null, source: 'self', customReasonText: null };
               const statusMeta = getStatusMeta(statusInfo.status);
               const statusDesc = STATUS_DESCRIPTIONS[statusInfo.status] || '';
-              const statusText = statusInfo.message || statusDesc;
+              const reasonText = reasonDisplay(statusInfo.reason, statusInfo.customReasonText);
+              const statusText = statusInfo.message || reasonText || statusDesc;
+              const isHostSet = statusInfo.source === 'host';
               const remain = formatRemaining(statusInfo.untilMs, nowTick);
               const mine = r.user_id === ctx.userId;
               return (
@@ -844,6 +1431,7 @@ function SquadNode({ squad, depth, childrenOf, membersOf, peopleMap, totals,
                       <span className={`oc-status-pill oc-status-pill--${statusInfo.status}`}>
                         <span className="oc-status-dot" />{statusMeta.label}
                       </span>
+                      {isHostSet && <span className="oc-host-badge">Host set</span>}
                       <span className="oc-status-msg">
                         {statusText}{remain ? ` · ${remain}` : ''}
                       </span>
@@ -1340,11 +1928,13 @@ function RequestJoin({ squad, positionOptions, run, close }) {
 // lưu). Tương lai: email, chat duhat… (đang để disabled "sắp có").
 function PersonActions({ person, close, dialog, statusByUser, nowTick }) {
   const phone = person?.work_phone && person.work_phone.trim();
-  const info = statusByUser?.[person?.user_id] || { status: 'available', message: null, untilMs: null };
+  const info = statusByUser?.[person?.user_id] || { status: 'available', message: null, untilMs: null, reason: null, source: 'self', customReasonText: null };
   const meta = getStatusMeta(info.status);
   const remain = formatRemaining(info.untilMs, nowTick);
   const msg = statusMessage(info.status, info.message);
-  const copyText = msg ? `${meta.label}: ${msg}${remain ? ` (${remain})` : ''}` : meta.label;
+  const reasonText = reasonDisplay(info.reason, info.customReasonText);
+  const displayText = msg || reasonText || '';
+  const copyText = displayText ? `${meta.label}: ${displayText}${remain ? ` (${remain})` : ''}` : meta.label;
 
   async function copyStatus() {
     try {
@@ -1363,6 +1953,7 @@ function PersonActions({ person, close, dialog, statusByUser, nowTick }) {
         <span className={`oc-status-pill oc-status-pill--${info.status}`}>
           <span className="oc-status-dot" />{meta.label}
         </span>
+        {reasonText && <div className="oc-status-reason-badge">{reasonText}</div>}
         {msg && <div className="oc-status-current-msg">{msg}</div>}
         {remain && <div className="oc-status-remaining">{remain}</div>}
       </div>

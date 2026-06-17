@@ -155,9 +155,12 @@ async function main() {
   }
 
   // 4. Ghi .env
-  const lines = existsSync(envPath) ? readFileSync(envPath, 'utf8').split('\n') : [];
+  const lines = existsSync(envPath) ? readFileSync(envPath, 'utf8').split(/\r?\n/) : [];
   const merge = { ...Object.fromEntries(
-    lines.filter(Boolean).filter((l) => !l.startsWith('#')).map((l) => l.split('=', 2))
+    lines
+      .filter(Boolean)
+      .filter((l) => !l.startsWith('#') && l.includes('='))
+      .map((l) => { const idx = l.indexOf('='); return [l.slice(0, idx).trim(), l.slice(idx + 1).trim()]; })
   ),
     VITE_DEV_TOKEN: auth.session.access_token,
     VITE_DEV_WORKSPACE_ID: workspaceId,
@@ -168,10 +171,12 @@ async function main() {
   const out = [];
   const seen = new Set();
   for (const line of lines) {
-    if (!line || line.startsWith('#')) { out.push(line); continue; }
-    const k = line.split('=', 1)[0];
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith('#')) { out.push(trimmed); continue; }
+    if (!trimmed.includes('=')) { out.push(trimmed); continue; }
+    const k = trimmed.slice(0, trimmed.indexOf('=')).trim();
     if (k in merge) { out.push(`${k}=${merge[k]}`); seen.add(k); }
-    else out.push(line);
+    else out.push(trimmed);
   }
   for (const k of Object.keys(merge)) {
     if (!seen.has(k)) out.push(`${k}=${merge[k]}`);

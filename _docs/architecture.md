@@ -1,6 +1,6 @@
 # Org Chart — Architecture
 
-> Đọc cùng `_docs/requirements.md` + `CLAUDE.md` (template rules). Schema `app_org_chart` (slug `org-chart`, dash→underscore).
+> Đọc cùng `_docs/requirements.md` + `CLAUDE.md` (template rules). Schema `app_status_mate` (slug `status-mate`, dash→underscore).
 > Mọi bảng: `workspace_id uuid not null` + RLS `workspace_isolation` + index `workspace_id`. Mọi query client `.eq('workspace_id', ctx.workspaceId)`.
 
 ---
@@ -10,23 +10,23 @@
 | Tầng | Sở hữu | Repo |
 |---|---|---|
 | Identity (full_name/job_title/work_phone), gate app-open, RLS boundary `workspace_id`, workspace-mate visibility | **Core/Shell** | superapp (KHỐI A) |
-| Squads (cây), positions, membership, allocation, requests, org chart viz | **mini-app `org-chart`** | repo này (KHỐI B) |
+| Squads (cây), positions, membership, allocation, requests, org chart viz | **mini-app `status-mate`** | repo này (KHỐI B) |
 
-`org-chart` **đọc** `full_name`/`job_title`/`work_phone` của member cùng workspace qua `src/lib/members.js` (workspace-mate visibility, superapp mig 004 — cần mig 020 mở thêm 3 field). KHÔNG tự lưu identity.
+`status-mate` **đọc** `full_name`/`job_title`/`work_phone` của member cùng workspace qua `src/lib/members.js` (workspace-mate visibility, superapp mig 004 — cần mig 020 mở thêm 3 field). KHÔNG tự lưu identity.
 
 ---
 
-## 2. Data model — schema `app_org_chart`
+## 2. Data model — schema `app_status_mate`
 
 > Quy ước đặt tên tránh nhầm: **`kind`** = loại thành viên trong squad (`lead`|`member`); **`position`** = vai trò chức năng (Product/Tech/…); **`allocation`** = % phân bổ năng lực.
 
 ### 2.1 `squads` — cây org chart
 
 ```sql
-create table if not exists app_org_chart.squads (
+create table if not exists app_status_mate.squads (
   id            uuid primary key default gen_random_uuid(),
   workspace_id  uuid not null references public.workspaces(id) on delete cascade,
-  parent_id     uuid references app_org_chart.squads(id) on delete set null,
+  parent_id     uuid references app_status_mate.squads(id) on delete set null,
   slug          text not null,
   name          text not null,
   intro         text,                          -- introduction / goals (S3)
@@ -37,14 +37,14 @@ create table if not exists app_org_chart.squads (
   archived_at   timestamptz,
   unique (workspace_id, slug)
 );
-create index if not exists idx_squads_ws on app_org_chart.squads (workspace_id);
-create index if not exists idx_squads_ws_parent on app_org_chart.squads (workspace_id, parent_id);
+create index if not exists idx_squads_ws on app_status_mate.squads (workspace_id);
+create index if not exists idx_squads_ws_parent on app_status_mate.squads (workspace_id, parent_id);
 ```
 
 ### 2.2 `positions` — vai trò chức năng cấp workspace (admin CRUD)
 
 ```sql
-create table if not exists app_org_chart.positions (
+create table if not exists app_status_mate.positions (
   id            uuid primary key default gen_random_uuid(),
   workspace_id  uuid not null references public.workspaces(id) on delete cascade,
   name          text not null,
@@ -54,7 +54,7 @@ create table if not exists app_org_chart.positions (
   created_at    timestamptz not null default now(),
   unique (workspace_id, name)
 );
-create index if not exists idx_positions_ws on app_org_chart.positions (workspace_id);
+create index if not exists idx_positions_ws on app_status_mate.positions (workspace_id);
 ```
 
 "Other" KHÔNG là row — UI cho nhập tự do, lưu thẳng vào `squad_members.position` (text).
@@ -62,10 +62,10 @@ create index if not exists idx_positions_ws on app_org_chart.positions (workspac
 ### 2.3 `squad_members` — thành viên + allocation + position
 
 ```sql
-create table if not exists app_org_chart.squad_members (
+create table if not exists app_status_mate.squad_members (
   id            uuid primary key default gen_random_uuid(),
   workspace_id  uuid not null references public.workspaces(id) on delete cascade,
-  squad_id      uuid not null references app_org_chart.squads(id) on delete cascade,
+  squad_id      uuid not null references app_status_mate.squads(id) on delete cascade,
   user_id       uuid not null references auth.users(id),
   kind          text not null default 'member' check (kind in ('lead','member')),
   position      text not null,                 -- tên position hoặc free text "Other"
@@ -74,10 +74,10 @@ create table if not exists app_org_chart.squad_members (
   left_at       timestamptz,                   -- null = đang trong squad
   created_by    uuid not null references auth.users(id)
 );
-create index if not exists idx_sm_ws on app_org_chart.squad_members (workspace_id);
-create index if not exists idx_sm_ws_squad on app_org_chart.squad_members (workspace_id, squad_id);
+create index if not exists idx_sm_ws on app_status_mate.squad_members (workspace_id);
+create index if not exists idx_sm_ws_squad on app_status_mate.squad_members (workspace_id, squad_id);
 create unique index if not exists uq_sm_active
-  on app_org_chart.squad_members (squad_id, user_id) where left_at is null;
+  on app_status_mate.squad_members (squad_id, user_id) where left_at is null;
 ```
 
 - Lead: 1 row `kind='lead'` tạo khi admin gán `squads.lead_user_id` (đồng bộ — xem RPC).
@@ -87,10 +87,10 @@ create unique index if not exists uq_sm_active
 ### 2.4 `membership_requests` — request join/leave
 
 ```sql
-create table if not exists app_org_chart.membership_requests (
+create table if not exists app_status_mate.membership_requests (
   id              uuid primary key default gen_random_uuid(),
   workspace_id    uuid not null references public.workspaces(id) on delete cascade,
-  squad_id        uuid not null references app_org_chart.squads(id) on delete cascade,
+  squad_id        uuid not null references app_status_mate.squads(id) on delete cascade,
   user_id         uuid not null references auth.users(id),
   type            text not null check (type in ('join','leave')),
   req_position    text,                         -- khi join (M4)
@@ -103,19 +103,19 @@ create table if not exists app_org_chart.membership_requests (
   created_by      uuid not null references auth.users(id),
   created_at      timestamptz not null default now()
 );
-create index if not exists idx_mr_ws on app_org_chart.membership_requests (workspace_id);
+create index if not exists idx_mr_ws on app_status_mate.membership_requests (workspace_id);
 create unique index if not exists uq_mr_pending
-  on app_org_chart.membership_requests (squad_id, user_id) where status = 'pending';
+  on app_status_mate.membership_requests (squad_id, user_id) where status = 'pending';
 ```
 
 ### 2.5 `squad_events` — append-only log (movement = logs)
 
 ```sql
 -- @realtime  (Sub-3: cây cập nhật live khi có người vào/ra)
-create table if not exists app_org_chart.squad_events (
+create table if not exists app_status_mate.squad_events (
   id            uuid primary key default gen_random_uuid(),
   workspace_id  uuid not null references public.workspaces(id) on delete cascade,
-  squad_id      uuid references app_org_chart.squads(id) on delete cascade,
+  squad_id      uuid references app_status_mate.squads(id) on delete cascade,
   actor_id      uuid references auth.users(id),
   subject_id    uuid references auth.users(id),
   type          text not null,                  -- joined|left|role_changed|lead_assigned|
@@ -125,14 +125,14 @@ create table if not exists app_org_chart.squad_events (
   created_by    uuid not null references auth.users(id),
   created_at    timestamptz not null default now()
 );
-create index if not exists idx_se_ws_created on app_org_chart.squad_events (workspace_id, created_at desc);
+create index if not exists idx_se_ws_created on app_status_mate.squad_events (workspace_id, created_at desc);
 ```
 
 > RLS: tất cả bảng dùng `workspace_isolation` (template CLAUDE.md §3.2). Read mở cho mọi member workspace (M1: ai cũng xem được cây). Mutation kiểm soát qua RPC SECURITY DEFINER (mục 3) vì cần check role/lead — RLS một mình không phân biệt được "lead của squad X".
 
 ---
 
-## 3. RPC (SECURITY DEFINER, search_path = app_org_chart, public)
+## 3. RPC (SECURITY DEFINER, search_path = app_status_mate, public)
 
 Đặt trong migration. Mỗi RPC tự check quyền bằng `auth.uid()` + helper core `public.is_workspace_admin(ws)` / `public.is_workspace_member(ws)`.
 
@@ -146,7 +146,7 @@ create index if not exists idx_se_ws_created on app_org_chart.squad_events (work
 | `decide_membership(req_id, approve)` | lead của squad đó **hoặc** workspace admin | update request; nếu approve+join → insert `squad_members(kind='member')`; nếu approve+leave → set `left_at`; event `joined`/`left`/`request_decided` |
 | `set_my_allocation(squad_id, allocation, position)` | chính member (đang trong squad) | update allocation/position của row mình (M4 cho phép tự chỉnh sau) |
 
-**Không cần** service_role / mini-proxy cho các thao tác trên (toàn bộ trong schema `app_org_chart`). Push noti (Sub-3, báo lead có request / báo member được duyệt) mới đi qua `mushyApi.push()` → superapp mini-proxy, `data.appSlug='org-chart'` BẮT BUỘC.
+**Không cần** service_role / mini-proxy cho các thao tác trên (toàn bộ trong schema `app_status_mate`). Push noti (Sub-3, báo lead có request / báo member được duyệt) mới đi qua `mushyApi.push()` → superapp mini-proxy, `data.appSlug='status-mate'` BẮT BUỘC.
 
 ---
 

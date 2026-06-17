@@ -15,41 +15,61 @@
 -- =====================================================================
 
 -- ---------- squads ----------
-drop policy if exists "workspace_isolation" on app_org_chart.squads;
-create policy "org_group_isolation" on app_org_chart.squads
+drop policy if exists "org_group_isolation" on app_status_mate.squads;
+drop policy if exists "workspace_isolation" on app_status_mate.squads;
+create policy "workspace_isolation" on app_status_mate.squads
 for select using (
-  org_group_id is not null
-  and app_org_chart.user_can_see_org_group(org_group_id)
+  workspace_id in (select workspace_id from public.workspace_members where user_id = auth.uid())
+  or (
+    org_group_id is not null
+    and app_status_mate.user_can_see_org_group(org_group_id)
+  )
 );
 
 -- ---------- positions ----------
-drop policy if exists "workspace_isolation" on app_org_chart.positions;
-create policy "org_group_isolation" on app_org_chart.positions
+drop policy if exists "org_group_isolation" on app_status_mate.positions;
+drop policy if exists "workspace_isolation" on app_status_mate.positions;
+create policy "workspace_isolation" on app_status_mate.positions
 for select using (
-  org_group_id is not null
-  and app_org_chart.user_can_see_org_group(org_group_id)
+  workspace_id in (select workspace_id from public.workspace_members where user_id = auth.uid())
+  or (
+    org_group_id is not null
+    and app_status_mate.user_can_see_org_group(org_group_id)
+  )
 );
 
 -- ---------- squad_members ----------
-drop policy if exists "workspace_isolation" on app_org_chart.squad_members;
-create policy "org_group_isolation" on app_org_chart.squad_members
+drop policy if exists "org_group_isolation" on app_status_mate.squad_members;
+drop policy if exists "workspace_isolation" on app_status_mate.squad_members;
+create policy "workspace_isolation" on app_status_mate.squad_members
 for select using (
-  org_group_id is not null
-  and app_org_chart.user_can_see_org_group(org_group_id)
+  workspace_id in (select workspace_id from public.workspace_members where user_id = auth.uid())
+  or (
+    org_group_id is not null
+    and app_status_mate.user_can_see_org_group(org_group_id)
+  )
 );
 
 -- ---------- membership_requests ----------
-drop policy if exists "workspace_isolation" on app_org_chart.membership_requests;
-create policy "org_group_isolation" on app_org_chart.membership_requests
+drop policy if exists "org_group_isolation" on app_status_mate.membership_requests;
+drop policy if exists "workspace_isolation" on app_status_mate.membership_requests;
+create policy "workspace_isolation" on app_status_mate.membership_requests
 for select using (
-  org_group_id is not null
-  and app_org_chart.user_can_see_org_group(org_group_id)
+  workspace_id in (select workspace_id from public.workspace_members where user_id = auth.uid())
+  or (
+    org_group_id is not null
+    and app_status_mate.user_can_see_org_group(org_group_id)
+  )
 );
 
 -- ---------- squad_events ----------
-drop policy if exists "workspace_isolation" on app_org_chart.squad_events;
-create policy "org_group_isolation" on app_org_chart.squad_events
+drop policy if exists "org_group_isolation" on app_status_mate.squad_events;
+drop policy if exists "workspace_isolation" on app_status_mate.squad_events;
+create policy "workspace_isolation" on app_status_mate.squad_events
 for select using (
-  org_group_id is not null
-  and app_org_chart.user_can_see_org_group(org_group_id)
+  workspace_id in (select workspace_id from public.workspace_members where user_id = auth.uid())
+  or (
+    org_group_id is not null
+    and app_status_mate.user_can_see_org_group(org_group_id)
+  )
 );

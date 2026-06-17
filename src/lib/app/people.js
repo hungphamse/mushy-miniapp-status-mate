@@ -74,7 +74,7 @@ export async function listGroupPeople(groupId) {
   const pmap = Object.fromEntries((profiles || []).map((p) => [p.user_id, p]));
 
   // 4. job_title per-company + companies user thuộc (logo).
-  // Dùng RPC app_org_chart.get_users_companies (mig 009 SECURITY DEFINER)
+  // Dùng RPC app_status_mate.get_users_companies (mig 009 SECURITY DEFINER)
   // để bypass RLS public.company_members — RLS chỉ cho user thấy member
   // cùng company → follower ws (user khác company) trả empty → không logo.
   // RPC expose company info công khai (id, name, logo_url, job_title) cho
@@ -102,18 +102,32 @@ export async function listGroupPeople(groupId) {
   } catch { /* RPC chưa apply hoặc lỗi — skip */ }
 
   // 5. Status-Mate (member_statuses) — optional, fallback nếu chưa apply mig.
+  //    Mig 012 thêm reason/source/custom_reason_text; mig 013 thêm meeting_room_id.
+  //    Supabase trả { data: null, error } nếu column chưa có — fallback giữ Phase 1 chạy.
   const statusMap = {};
   try {
-    const { data: statuses, error: sErr } = await db
+    let { data: statuses, error: sErr } = await db
       .from('member_statuses')
-      .select('user_id, status, message, status_until, updated_at')
+      .select('user_id, status, message, status_until, reason, source, custom_reason_text, meeting_room_id, updated_at')
       .eq('org_group_id', groupId);
+    if (sErr) {
+      const fallback = await db
+        .from('member_statuses')
+        .select('user_id, status, message, status_until, reason, source, custom_reason_text, updated_at')
+        .eq('org_group_id', groupId);
+      statuses = fallback.data;
+      sErr = fallback.error;
+    }
     if (!sErr) {
       for (const s of statuses || []) {
         statusMap[s.user_id] = {
           status: s.status,
           message: s.message,
           status_until: s.status_until,
+          reason: s.reason ?? null,
+          source: s.source ?? 'self',
+          custom_reason_text: s.custom_reason_text ?? null,
+          meeting_room_id: s.meeting_room_id ?? null,
           updated_at: s.updated_at,
         };
       }
@@ -136,6 +150,10 @@ export async function listGroupPeople(groupId) {
       status: st.status ?? null,
       status_message: st.message ?? null,
       status_until: st.status_until ?? null,
+      status_reason: st.reason ?? null,
+      status_source: st.source ?? 'self',
+      status_custom_reason: st.custom_reason_text ?? null,
+      meeting_room_id: st.meeting_room_id ?? null,
       status_updated_at: st.updated_at ?? null,
     };
   });

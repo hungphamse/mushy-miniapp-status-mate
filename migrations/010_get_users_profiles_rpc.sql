@@ -1,5 +1,5 @@
 -- =====================================================================
--- org-chart · 010 · RPC get_users_basic_profiles (bypass RLS user_profiles)
+-- status-mate · 010 · RPC get_users_basic_profiles (bypass RLS user_profiles)
 --
 -- Cùng pattern mig 009: cross-ws sharing → follower ws thấy user_ids của
 -- origin ws members (qua mig 008 RLS group-scoped). NHƯNG public.user_profiles
@@ -13,7 +13,7 @@
 -- sharing đã expose org chart công khai.
 -- =====================================================================
 
-create or replace function app_org_chart.get_users_basic_profiles(p_user_ids uuid[])
+create or replace function app_status_mate.get_users_basic_profiles(p_user_ids uuid[])
 returns table (
   user_id        uuid,
   full_name      text,
@@ -22,7 +22,7 @@ returns table (
   work_email     text,
   personal_email text
 )
-language sql stable security definer set search_path = app_org_chart as $$
+language sql stable security definer set search_path = app_status_mate as $$
   select
     up.user_id,
     up.full_name,
@@ -33,4 +33,4 @@ language sql stable security definer set search_path = app_org_chart as $$
   from public.user_profiles up
   where up.user_id = any(p_user_ids);
 $$;
-grant execute on function app_org_chart.get_users_basic_profiles(uuid[]) to authenticated;
+grant execute on function app_status_mate.get_users_basic_profiles(uuid[]) to authenticated;

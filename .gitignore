@@ -17,3 +17,12 @@ npm-debug.log*
 
 # Temp
 *temp*
+
+# Claude files
+.claude
+
+# Serena
+.serena
+
+# VS Code
+.vscode
