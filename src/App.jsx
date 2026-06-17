@@ -949,7 +949,8 @@ function MeetingControlPanel({
   const [title, setTitle] = useState('');
   const [duration, setDuration] = useState('30');
   const [customUntil, setCustomUntil] = useState('');
-  const [participantUserId, setParticipantUserId] = useState('');
+  const [addMembersOpen, setAddMembersOpen] = useState(false);
+  const [selectedParticipantIds, setSelectedParticipantIds] = useState([]);
   const [targetUserId, setTargetUserId] = useState('');
   const [detailOpen, setDetailOpen] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -1002,10 +1003,7 @@ function MeetingControlPanel({
       email: '',
     };
   });
-  const meParticipant = activeParticipants.find((p) => p.user_id === ctx?.userId);
-  const canManage = !!activeRoom && (
-    isAdmin || activeRoom.host_user_id === ctx?.userId || meParticipant?.role === 'co_host'
-  );
+  const canManage = !!activeRoom && activeRoom.host_user_id === ctx?.userId;
   const availablePeople = people.filter((p) => !participantIds.has(p.user_id));
   const roomOptions = rooms.map((r) => ({
     value: r.id,
@@ -1026,6 +1024,14 @@ function MeetingControlPanel({
       setTargetUserId('');
     }
   }, [activeParticipants, targetUserId]);
+  useEffect(() => {
+    if (selectedParticipantIds.length === 0) return;
+    const availableIds = new Set(availablePeople.map((p) => p.user_id));
+    const nextSelected = selectedParticipantIds.filter((id) => availableIds.has(id));
+    if (nextSelected.length !== selectedParticipantIds.length) {
+      setSelectedParticipantIds(nextSelected);
+    }
+  }, [availablePeople, selectedParticipantIds]);
 
   const peopleHaveStatus = (rows, userIds, expectedStatus) => {
     const nextStatusByUser = new Map(
@@ -1083,13 +1089,21 @@ function MeetingControlPanel({
     setTitle('');
   };
 
-  const addParticipant = async () => {
-    if (!roomId || !participantUserId) return;
+  const toggleParticipantSelection = (userId) => {
+    setSelectedParticipantIds((prev) => (
+      prev.includes(userId) ? prev.filter((id) => id !== userId) : [...prev, userId]
+    ));
+  };
+
+  const addParticipants = async () => {
+    if (!roomId || !canManage || selectedParticipantIds.length === 0 || activeRoom?.status === 'ended') return;
+    const count = selectedParticipantIds.length;
     await run(
-      () => api.addMeetingParticipants(roomId, [participantUserId]),
-      'Đã thêm người tham gia.',
+      () => api.addMeetingParticipants(roomId, selectedParticipantIds),
+      `Đã thêm ${count} người tham gia.`,
     );
-    setParticipantUserId('');
+    setSelectedParticipantIds([]);
+    setAddMembersOpen(false);
   };
 
   const applyAll = async () => {
@@ -1190,14 +1204,16 @@ function MeetingControlPanel({
         {canManage && (
           <div className="oc-meeting-tools">
             <div className="oc-meeting-tool">
-              <MemberSearchSelect
-                value={participantUserId}
-                onChange={setParticipantUserId}
-                people={availablePeople}
-                placeholder="Thêm người tham gia"
-              />
-              <button className="oc-mini-btn" disabled={busy || !participantUserId} onClick={addParticipant}>
-                +
+              <div className="oc-meeting-tool-text">
+                <strong>Người tham gia</strong>
+                <span>{availablePeople.length} người có thể thêm</span>
+              </div>
+              <button
+                className="oc-mini-btn oc-mini-btn--wide"
+                disabled={busy || activeRoom.status === 'ended' || availablePeople.length === 0}
+                onClick={() => setAddMembersOpen(true)}
+              >
+                Thêm người
               </button>
             </div>
             <div className="oc-meeting-tool">
@@ -1223,6 +1239,20 @@ function MeetingControlPanel({
               </button>
             </div>
           </div>
+        )}
+
+        {addMembersOpen && (
+          <MeetingAddParticipantsDialog
+            people={availablePeople}
+            selectedIds={selectedParticipantIds}
+            busy={busy}
+            onToggle={toggleParticipantSelection}
+            onClose={() => {
+              setAddMembersOpen(false);
+              setSelectedParticipantIds([]);
+            }}
+            onSubmit={addParticipants}
+          />
         )}
 
         <div className="oc-meeting-participants">
@@ -1330,6 +1360,47 @@ function MeetingControlPanel({
         </>
       )}
     </div>
+  );
+}
+
+function MeetingAddParticipantsDialog({ people, selectedIds, busy, onToggle, onClose, onSubmit }) {
+  return (
+    <Scrim close={onClose}>
+      <h3 className="dialog-title">Thêm người tham gia</h3>
+      <div className="oc-meeting-add-list">
+        {people.length === 0 ? (
+          <div className="oc-meeting-empty">Không còn ai để thêm vào phòng.</div>
+        ) : people.map((person) => {
+          const selected = selectedIds.includes(person.user_id);
+          return (
+            <button
+              key={person.user_id}
+              type="button"
+              className={`oc-meeting-add-row ${selected ? 'is-selected' : ''}`}
+              onClick={() => onToggle(person.user_id)}
+            >
+              <span className="oc-meeting-add-check">{selected ? '✓' : ''}</span>
+              <span className="oc-meeting-add-person">
+                <strong>{personLabel(person)}</strong>
+                {person.email && <small>{person.email}</small>}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+      <div className="form-actions">
+        <button className="mushy-btn mushy-btn--ghost" onClick={onClose} disabled={busy}>
+          Huỷ
+        </button>
+        <button
+          className="mushy-btn mushy-btn--primary"
+          onClick={onSubmit}
+          disabled={busy || selectedIds.length === 0}
+        >
+          Thêm {selectedIds.length || ''}
+        </button>
+      </div>
+    </Scrim>
   );
 }
 

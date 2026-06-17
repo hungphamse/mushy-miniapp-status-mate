@@ -77,14 +77,7 @@ as $$
 select exists (select 1
 from app_status_mate.meeting_rooms r
 where r.id=p_room_id
-and (r.host_user_id=auth.uid()
-or public.is_workspace_admin(r.workspace_id)
-or exists (select 1
-from app_status_mate.meeting_participants mp
-where mp.room_id=r.id
-and mp.user_id=auth.uid()
-and mp.role='co_host'
-and mp.left_at is null)));
+and r.host_user_id=auth.uid());
 $$;
 grant execute on function app_status_mate._meeting_room_can_manage(uuid) to authenticated;
 create or replace function app_status_mate._meeting_participant_role(p_room_id uuid,p_user_id uuid)
