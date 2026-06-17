@@ -32,6 +32,7 @@ export async function listMeetingRooms(groupId) {
     .from('meeting_rooms')
     .select('*')
     .eq('org_group_id', groupId)
+    .neq('status', 'ended')
     .order('created_at', { ascending: false });
   if (error) throw error;
   return data || [];
@@ -109,14 +110,6 @@ export const api = {
     call('apply_meeting_mode', {
       p_room_id,
       p_user_ids: p_user_ids || null,
-      p_until: p_until || null,
-    }),
-  setStatusForMember: (p_room_id, p_user_id, p_status, p_message, p_until) =>
-    call('set_status_for_member', {
-      p_room_id,
-      p_user_id,
-      p_status: p_status || 'in_meeting',
-      p_message: p_message || null,
       p_until: p_until || null,
     }),
   restoreMeetingStatusForRoom: (p_room_id, p_user_ids = null) =>

@@ -18,8 +18,7 @@ drop trigger if exists trg_mp_updated_at on app_status_mate.meeting_participants
 create trigger trg_mp_updated_at before update on app_status_mate.meeting_participants
 for each row execute function app_status_mate.set_updated_at();
 create table if not exists app_status_mate.status_event_log (event_id uuid primary key default gen_random_uuid(),workspace_id uuid not null references public.workspaces(id) on delete cascade,org_group_id uuid not null references app_status_mate.org_groups(id) on delete cascade,room_id uuid references app_status_mate.meeting_rooms(id) on delete set null,user_id uuid not null references auth.users(id),action text not null check (action in ('set_status','override_status','auto_reset','meeting_create','meeting_start','meeting_end','meeting_apply','meeting_restore')),from_status text,to_status text not null,triggered_by_user_id uuid references auth.users(id),details jsonb not null default '{}'::jsonb,created_by uuid not null references auth.users(id),created_at timestamptz not null default now());
-create index if not exists idx_sel_ws_created
-on app_status_mate.status_event_log (workspace_id,created_at desc);
+create index if not exists idx_sel_ws on app_status_mate.status_event_log (workspace_id);
 create index if not exists idx_sel_group_created
 on app_status_mate.status_event_log (org_group_id,created_at desc);
 create index if not exists idx_sel_room_created
@@ -52,13 +51,17 @@ add column if not exists meeting_room_id uuid
 references app_status_mate.meeting_rooms(id) on delete set null;
 create index if not exists idx_ms_meeting_room
 on app_status_mate.member_statuses (meeting_room_id);
-create or replace function app_status_mate.user_can_see_org_group(p_group_id uuid) returns boolean language sql stable security definer set search_path=pg_catalog,app_status_mate as $$ select exists (select 1 from app_status_mate.org_groups g where g.id=p_group_id and g.deleted_at is null and (g.workspace_id in (select workspace_id from public.workspace_members where user_id=auth.uid()) or exists (select 1 from app_status_mate.org_group_workspaces gw join public.workspace_members wm on wm.workspace_id=gw.workspace_id where gw.org_group_id=g.id and wm.user_id=auth.uid()))); $$;
-create or replace function app_status_mate.is_org_group_member(p_group_id uuid) returns boolean language sql stable security definer set search_path=pg_catalog,app_status_mate as $$ select exists (select 1 from app_status_mate.org_group_workspaces gw join public.workspace_members wm on wm.workspace_id=gw.workspace_id where gw.org_group_id=p_group_id and wm.user_id=auth.uid()); $$;
-create or replace function app_status_mate._group_origin_ws(p_group_id uuid) returns uuid language sql stable security definer set search_path=pg_catalog,app_status_mate as $$ select workspace_id from app_status_mate.org_groups where id=p_group_id; $$;
+alter table app_status_mate.member_statuses enable row level security;
+drop policy if exists "workspace_isolation" on app_status_mate.member_statuses;
+-- user_can_see_org_group(uuid) is defined in migration 004.
+create policy "workspace_isolation" on app_status_mate.member_statuses for select using (workspace_id in (select workspace_id from public.workspace_members where user_id=auth.uid()) or app_status_mate.user_can_see_org_group(org_group_id));
+create or replace function app_status_mate.is_org_group_member(p_group_id uuid) returns boolean language sql stable security invoker set search_path=pg_catalog,app_status_mate as $$ select exists (select 1 from app_status_mate.org_group_workspaces gw join public.workspace_members wm on wm.workspace_id=gw.workspace_id where gw.org_group_id=p_group_id and wm.user_id=auth.uid()); $$;
+create or replace function app_status_mate._group_origin_ws(p_group_id uuid) returns uuid language sql stable security invoker set search_path=pg_catalog,app_status_mate as $$ select workspace_id from app_status_mate.org_groups where id=p_group_id; $$;
+revoke all on function app_status_mate._group_origin_ws(uuid) from public,authenticated;
 create or replace function app_status_mate._append_status_event(p_workspace_id uuid,p_group_id uuid,p_room_id uuid,p_user_id uuid,p_action text,p_from_status text,p_to_status text,p_triggered_by_user_id uuid default null,p_details jsonb default '{}'::jsonb)
 returns void
 language plpgsql
-security definer
+security invoker
 set search_path=pg_catalog,app_status_mate
 as $$
 begin
@@ -67,31 +70,25 @@ insert into app_status_mate.status_event_log
 values
 (p_workspace_id,p_group_id,p_room_id,p_user_id,p_action,p_from_status,p_to_status,p_triggered_by_user_id,coalesce(p_details,'{}'::jsonb),coalesce(auth.uid(),p_triggered_by_user_id,p_user_id));
 end $$;
+revoke all on function app_status_mate._append_status_event(uuid,uuid,uuid,uuid,text,text,text,uuid,jsonb) from public,authenticated;
 create or replace function app_status_mate._meeting_room_can_manage(p_room_id uuid)
 returns boolean
 language sql
 stable
-security definer
+security invoker
 set search_path=pg_catalog,app_status_mate
 as $$
 select exists (select 1
 from app_status_mate.meeting_rooms r
 where r.id=p_room_id
-and (r.host_user_id=auth.uid()
-or public.is_workspace_admin(r.workspace_id)
-or exists (select 1
-from app_status_mate.meeting_participants mp
-where mp.room_id=r.id
-and mp.user_id=auth.uid()
-and mp.role='co_host'
-and mp.left_at is null)));
+and r.host_user_id=auth.uid());
 $$;
-grant execute on function app_status_mate._meeting_room_can_manage(uuid) to authenticated;
+revoke all on function app_status_mate._meeting_room_can_manage(uuid) from public,authenticated;
 create or replace function app_status_mate._meeting_participant_role(p_room_id uuid,p_user_id uuid)
 returns text
 language sql
 stable
-security definer
+security invoker
 set search_path=pg_catalog,app_status_mate
 as $$
 select case
@@ -105,12 +102,12 @@ and mp.left_at is null) then 'co_host'
 else 'member'
 end;
 $$;
-grant execute on function app_status_mate._meeting_participant_role(uuid,uuid) to authenticated;
+revoke all on function app_status_mate._meeting_participant_role(uuid,uuid) from public,authenticated;
 create or replace function app_status_mate._user_can_see_org_group_for_user(p_group_id uuid,p_user_id uuid)
 returns boolean
 language sql
 stable
-security definer
+security invoker
 set search_path=pg_catalog,app_status_mate
 as $$
 select exists (select 1
@@ -126,12 +123,12 @@ join public.workspace_members wm on wm.workspace_id=gw.workspace_id
 where gw.org_group_id=g.id
 and wm.user_id=p_user_id)));
 $$;
-grant execute on function app_status_mate._user_can_see_org_group_for_user(uuid,uuid) to authenticated;
+revoke all on function app_status_mate._user_can_see_org_group_for_user(uuid,uuid) from public,authenticated;
 create or replace function app_status_mate._member_status_snapshot(p_group_id uuid,p_user_id uuid)
 returns jsonb
 language sql
 stable
-security definer
+security invoker
 set search_path=pg_catalog,app_status_mate
 as $$
 select case
@@ -143,11 +140,11 @@ where ms.org_group_id=p_group_id
 and ms.user_id=p_user_id
 limit 1;
 $$;
-grant execute on function app_status_mate._member_status_snapshot(uuid,uuid) to authenticated;
+revoke all on function app_status_mate._member_status_snapshot(uuid,uuid) from public,authenticated;
 create or replace function app_status_mate._restore_member_status_snapshot(p_group_id uuid,p_user_id uuid,p_snapshot jsonb)
 returns void
 language plpgsql
-security definer
+security invoker
 set search_path=pg_catalog,app_status_mate
 as $$
 begin
@@ -165,11 +162,11 @@ on conflict (org_group_id,user_id)
 do update set
 status=excluded.status,message=excluded.message,status_until=excluded.status_until,reason=excluded.reason,source=excluded.source,set_by_user_id=excluded.set_by_user_id,custom_reason_text=excluded.custom_reason_text,previous_status=null,meeting_room_id=excluded.meeting_room_id,updated_at=now();
 end $$;
-grant execute on function app_status_mate._restore_member_status_snapshot(uuid,uuid,jsonb) to authenticated;
+revoke all on function app_status_mate._restore_member_status_snapshot(uuid,uuid,jsonb) from public,authenticated;
 create or replace function app_status_mate._apply_meeting_status(p_room_id uuid,p_user_id uuid,p_status text,p_message text,p_until timestamptz,p_source text,p_action text)
 returns void
 language plpgsql
-security definer
+security invoker
 set search_path=pg_catalog,app_status_mate
 as $$
 declare
@@ -200,13 +197,7 @@ end if;
 if p_source not in ('host','meeting_sync') then
 raise exception 'source không hợp lệ';
 end if;
-v_final_until :=coalesce(p_until,v_room.planned_end_at);
-if v_final_until is null then
-raise exception 'Host-set phải có thời hạn';
-end if;
-if v_final_until <= now() then
-raise exception 'Meeting until must be future';
-end if;
+v_final_until :=null;
 select * into v_current
 from app_status_mate.member_statuses
 where org_group_id=v_room.org_group_id
@@ -235,11 +226,11 @@ do update set
 role=excluded.role,left_at=null,meeting_status_applied=true,updated_at=now();
 perform app_status_mate._append_status_event(v_room.workspace_id,v_room.org_group_id,p_room_id,p_user_id,p_action,coalesce(v_current.status,'available'),p_status,auth.uid(),jsonb_build_object('source',p_source,'reason',v_reason,'until',v_final_until));
 end $$;
-grant execute on function app_status_mate._apply_meeting_status(uuid,uuid,text,text,timestamptz,text,text) to authenticated;
+revoke all on function app_status_mate._apply_meeting_status(uuid,uuid,text,text,timestamptz,text,text) from public,authenticated;
 create or replace function app_status_mate._restore_meeting_participant(p_room_id uuid,p_user_id uuid,p_action text default 'meeting_restore')
 returns void
 language plpgsql
-security definer
+security invoker
 set search_path=pg_catalog,app_status_mate
 as $$
 declare
@@ -256,6 +247,10 @@ end if;
 if not app_status_mate._meeting_room_can_manage(p_room_id) then
 raise exception 'Bạn không có quyền thao tác meeting room này';
 end if;
+update app_status_mate.meeting_participants
+set left_at=coalesce(left_at,now()),meeting_status_applied=false,updated_at=now()
+where room_id=p_room_id
+and user_id=p_user_id;
 select * into v_current
 from app_status_mate.member_statuses
 where org_group_id=v_room.org_group_id
@@ -275,17 +270,13 @@ and source in ('host','meeting_sync');
 else
 perform app_status_mate._restore_member_status_snapshot(v_room.org_group_id,p_user_id,v_snapshot);
 end if;
-update app_status_mate.meeting_participants
-set meeting_status_applied=false,updated_at=now()
-where room_id=p_room_id
-and user_id=p_user_id;
 perform app_status_mate._append_status_event(v_room.workspace_id,v_room.org_group_id,p_room_id,p_user_id,p_action,v_current.status,coalesce((v_snapshot->>'status'),'available'),auth.uid(),jsonb_build_object('source',v_current.source));
 end $$;
-grant execute on function app_status_mate._restore_meeting_participant(uuid,uuid,text) to authenticated;
+revoke all on function app_status_mate._restore_meeting_participant(uuid,uuid,text) from public,authenticated;
 create or replace function app_status_mate.create_meeting_room(p_group_id uuid,p_title text,p_planned_end_at timestamptz default null,p_co_host_user_ids uuid[] default '{}'::uuid[])
 returns app_status_mate.meeting_rooms
 language plpgsql
-security definer
+security definer -- auth-gated RPC
 set search_path=pg_catalog,app_status_mate
 as $$
 declare
@@ -336,7 +327,7 @@ grant execute on function app_status_mate.create_meeting_room(uuid,text,timestam
 create or replace function app_status_mate.add_meeting_participants(p_room_id uuid,p_user_ids uuid[])
 returns void
 language plpgsql
-security definer
+security definer -- auth-gated RPC
 set search_path=pg_catalog,app_status_mate
 as $$
 declare
@@ -371,7 +362,7 @@ grant execute on function app_status_mate.add_meeting_participants(uuid,uuid[]) 
 create or replace function app_status_mate.start_meeting_room(p_room_id uuid)
 returns void
 language plpgsql
-security definer
+security definer -- auth-gated RPC
 set search_path=pg_catalog,app_status_mate
 as $$
 declare
@@ -390,22 +381,13 @@ update app_status_mate.meeting_rooms
 set status='active',started_at=coalesce(started_at,now()),ended_at=null,ended_by_user_id=null
 where id=p_room_id;
 perform app_status_mate._append_status_event(v_room.workspace_id,v_room.org_group_id,p_room_id,v_room.host_user_id,'meeting_start',null,'active',auth.uid(),'{}'::jsonb);
+perform app_status_mate.apply_meeting_mode(p_room_id,null,null);
 end $$;
 grant execute on function app_status_mate.start_meeting_room(uuid) to authenticated;
-create or replace function app_status_mate.set_status_for_member(p_room_id uuid,p_user_id uuid,p_status text default 'in_meeting',p_message text default null,p_until timestamptz default null)
-returns void
-language plpgsql
-security definer
-set search_path=pg_catalog,app_status_mate
-as $$
-begin
-perform app_status_mate._apply_meeting_status(p_room_id,p_user_id,p_status,p_message,p_until,'host','meeting_apply');
-end $$;
-grant execute on function app_status_mate.set_status_for_member(uuid,uuid,text,text,timestamptz) to authenticated;
 create or replace function app_status_mate.apply_meeting_mode(p_room_id uuid,p_user_ids uuid[] default null,p_until timestamptz default null)
 returns void
 language plpgsql
-security definer
+security definer -- auth-gated RPC
 set search_path=pg_catalog,app_status_mate
 as $$
 declare
@@ -446,7 +428,7 @@ grant execute on function app_status_mate.apply_meeting_mode(uuid,uuid[],timesta
 create or replace function app_status_mate.restore_meeting_status_for_room(p_room_id uuid,p_user_ids uuid[] default null)
 returns void
 language plpgsql
-security definer
+security definer -- auth-gated RPC
 set search_path=pg_catalog,app_status_mate
 as $$
 declare
@@ -484,7 +466,7 @@ grant execute on function app_status_mate.restore_meeting_status_for_room(uuid,u
 create or replace function app_status_mate.end_meeting_room(p_room_id uuid,p_restore boolean default true)
 returns void
 language plpgsql
-security definer
+security definer -- auth-gated RPC
 set search_path=pg_catalog,app_status_mate
 as $$
 declare
@@ -511,7 +493,7 @@ grant execute on function app_status_mate.end_meeting_room(uuid,boolean) to auth
 create or replace function app_status_mate.set_my_status(p_group_id uuid,p_status text,p_message text default null,p_until timestamptz default null,p_reason text default null,p_custom_reason_text text default null)
 returns void
 language plpgsql
-security definer
+security definer -- auth-gated RPC
 set search_path=pg_catalog,app_status_mate
 as $$
 declare
@@ -579,7 +561,7 @@ grant execute on function app_status_mate.set_my_status(uuid,text,text,timestamp
 create or replace function app_status_mate.clear_my_status(p_group_id uuid)
 returns void
 language plpgsql
-security definer
+security definer -- auth-gated RPC
 set search_path=pg_catalog,app_status_mate
 as $$
 declare

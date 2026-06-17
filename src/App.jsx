@@ -949,8 +949,8 @@ function MeetingControlPanel({
   const [title, setTitle] = useState('');
   const [duration, setDuration] = useState('30');
   const [customUntil, setCustomUntil] = useState('');
-  const [participantUserId, setParticipantUserId] = useState('');
-  const [targetUserId, setTargetUserId] = useState('');
+  const [addMembersOpen, setAddMembersOpen] = useState(false);
+  const [selectedParticipantIds, setSelectedParticipantIds] = useState([]);
   const [detailOpen, setDetailOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [backendReady, setBackendReady] = useState(true);
@@ -993,19 +993,9 @@ function MeetingControlPanel({
 
   const activeRoom = rooms.find((r) => r.id === roomId) || null;
   const activeParticipants = participants.filter((p) => !p.left_at);
-  const participantIds = new Set(activeParticipants.map((p) => p.user_id));
-  const roomParticipantPeople = activeParticipants.map((participant) => {
-    const person = people.find((p) => p.user_id === participant.user_id);
-    return person || {
-      user_id: participant.user_id,
-      full_name: participant.user_id,
-      email: '',
-    };
-  });
-  const meParticipant = activeParticipants.find((p) => p.user_id === ctx?.userId);
-  const canManage = !!activeRoom && (
-    isAdmin || activeRoom.host_user_id === ctx?.userId || meParticipant?.role === 'co_host'
-  );
+  const activeParticipantIds = activeParticipants.map((p) => p.user_id);
+  const participantIds = new Set(activeParticipantIds);
+  const canManage = !!activeRoom && activeRoom.host_user_id === ctx?.userId;
   const availablePeople = people.filter((p) => !participantIds.has(p.user_id));
   const roomOptions = rooms.map((r) => ({
     value: r.id,
@@ -1021,26 +1011,12 @@ function MeetingControlPanel({
   useEffect(() => {
     if (!activeRoom) setDetailOpen(false);
   }, [activeRoom]);
-  useEffect(() => {
-    if (targetUserId && !activeParticipants.some((p) => p.user_id === targetUserId)) {
-      setTargetUserId('');
-    }
-  }, [activeParticipants, targetUserId]);
 
   const peopleHaveStatus = (rows, userIds, expectedStatus) => {
     const nextStatusByUser = new Map(
       (rows || []).map((person) => [person.user_id, person.status || 'available']),
     );
     return userIds.length > 0 && userIds.every((userId) => nextStatusByUser.get(userId) === expectedStatus);
-  };
-
-  const resolveMeetingStatusUntil = () => {
-    const plannedMs = activeRoom?.planned_end_at ? new Date(activeRoom.planned_end_at).getTime() : null;
-    if (Number.isFinite(plannedMs) && plannedMs > Date.now()) return activeRoom.planned_end_at;
-    const fallback = resolveMeetingUntil(duration, customUntil);
-    const fallbackMs = fallback ? new Date(fallback).getTime() : null;
-    if (Number.isFinite(fallbackMs) && fallbackMs > Date.now()) return fallback;
-    return new Date(Date.now() + 30 * 60000).toISOString();
   };
 
   const run = async (fn, success, verify) => {
@@ -1083,55 +1059,56 @@ function MeetingControlPanel({
     setTitle('');
   };
 
-  const addParticipant = async () => {
-    if (!roomId || !participantUserId) return;
-    await run(
-      () => api.addMeetingParticipants(roomId, [participantUserId]),
-      'Đã thêm người tham gia.',
-    );
-    setParticipantUserId('');
+  const openParticipantDialog = () => {
+    setSelectedParticipantIds(activeParticipantIds);
+    setAddMembersOpen(true);
   };
 
-  const applyAll = async () => {
-    if (!roomId || activeRoom?.status !== 'active') return;
-    const targetIds = activeParticipants.map((p) => p.user_id);
-    if (targetIds.length === 0) {
-      dialog.error('Chưa có người tham gia', 'Thêm thành viên vào phòng trước khi áp dụng trạng thái họp.');
+  const toggleParticipantSelection = (userId) => {
+    if (userId === activeRoom?.host_user_id) return;
+    setSelectedParticipantIds((prev) => (
+      prev.includes(userId) ? prev.filter((id) => id !== userId) : [...prev, userId]
+    ));
+  };
+
+  const manageParticipants = async () => {
+    if (!roomId || !activeRoom || !canManage || activeRoom.status === 'ended') return;
+    const desiredIds = Array.from(new Set([
+      activeRoom.host_user_id,
+      ...selectedParticipantIds,
+    ].filter(Boolean)));
+    const addIds = desiredIds.filter((id) => !participantIds.has(id));
+    const removeIds = activeParticipantIds.filter((id) => (
+      id !== activeRoom.host_user_id && !desiredIds.includes(id)
+    ));
+    if (addIds.length === 0 && removeIds.length === 0) {
+      setAddMembersOpen(false);
+      setSelectedParticipantIds([]);
       return;
     }
-    const until = resolveMeetingStatusUntil();
     await run(
-      () => api.applyMeetingMode(roomId, null, until),
-      'Đã áp dụng In Meeting cho mọi người trong phòng.',
+      async () => {
+        if (addIds.length > 0) await api.addMeetingParticipants(roomId, addIds);
+        if (activeRoom.status === 'active' && addIds.length > 0) {
+          await api.applyMeetingMode(roomId, addIds, null);
+        }
+        if (removeIds.length > 0) await api.restoreMeetingStatusForRoom(roomId, removeIds);
+        return { id: roomId };
+      },
+      'Đã cập nhật người tham gia.',
+    );
+    setSelectedParticipantIds([]);
+    setAddMembersOpen(false);
+  };
+
+  const startRoom = async () => {
+    if (!roomId || activeRoom?.status !== 'scheduled') return;
+    const targetIds = [...activeParticipantIds];
+    await run(
+      () => api.startMeetingRoom(roomId),
+      'Phòng họp đã bắt đầu.',
       (latestPeople) => peopleHaveStatus(latestPeople, targetIds, 'in_meeting'),
     );
-  };
-
-  const setOne = async () => {
-    if (!roomId || !targetUserId || activeRoom?.status !== 'active') return;
-    const selectedUserId = targetUserId;
-    const until = resolveMeetingStatusUntil();
-    await run(
-      () => api.setStatusForMember(
-        roomId,
-        selectedUserId,
-        'in_meeting',
-        activeRoom?.title || 'In meeting',
-        until,
-      ),
-      'Đã set In Meeting cho thành viên.',
-      (latestPeople) => peopleHaveStatus(latestPeople, [selectedUserId], 'in_meeting'),
-    );
-    setTargetUserId('');
-  };
-
-  const restoreOne = async () => {
-    if (!roomId || !targetUserId || activeRoom?.status !== 'active') return;
-    await run(
-      () => api.restoreMeetingStatusForRoom(roomId, [targetUserId]),
-      'Đã khôi phục trạng thái của thành viên.',
-    );
-    setTargetUserId('');
   };
 
   const endRoom = async () => {
@@ -1167,16 +1144,9 @@ function MeetingControlPanel({
           <button
             className="mushy-btn mushy-btn--ghost"
             disabled={busy || !canManage || activeRoom.status !== 'scheduled'}
-            onClick={() => run(() => api.startMeetingRoom(roomId), 'Phòng họp đã bắt đầu.')}
+            onClick={startRoom}
           >
             Bắt đầu
-          </button>
-          <button
-            className="mushy-btn mushy-btn--ghost"
-            disabled={busy || !canManage || activeRoom.status !== 'active' || activeParticipants.length === 0}
-            onClick={applyAll}
-          >
-            Áp dụng tất cả
           </button>
           <button
             className="mushy-btn mushy-btn--ghost"
@@ -1190,39 +1160,34 @@ function MeetingControlPanel({
         {canManage && (
           <div className="oc-meeting-tools">
             <div className="oc-meeting-tool">
-              <MemberSearchSelect
-                value={participantUserId}
-                onChange={setParticipantUserId}
-                people={availablePeople}
-                placeholder="Thêm người tham gia"
-              />
-              <button className="oc-mini-btn" disabled={busy || !participantUserId} onClick={addParticipant}>
-                +
-              </button>
-            </div>
-            <div className="oc-meeting-tool">
-              <MemberSearchSelect
-                value={targetUserId}
-                onChange={setTargetUserId}
-                people={roomParticipantPeople}
-                placeholder="Set/khôi phục thành viên"
-              />
+              <div className="oc-meeting-tool-text">
+                <strong>Người tham gia</strong>
+                <span>{activeParticipants.length} người trong phòng</span>
+              </div>
               <button
-                className="oc-mini-btn"
-                disabled={busy || !targetUserId || activeRoom.status !== 'active'}
-                onClick={setOne}
+                className="oc-mini-btn oc-mini-btn--wide"
+                disabled={busy || activeRoom.status === 'ended'}
+                onClick={openParticipantDialog}
               >
-                Set họp
-              </button>
-              <button
-                className="oc-mini-btn"
-                disabled={busy || !targetUserId || activeRoom.status !== 'active'}
-                onClick={restoreOne}
-              >
-                Khôi phục
+                Quản lý người
               </button>
             </div>
           </div>
+        )}
+
+        {addMembersOpen && (
+          <MeetingAddParticipantsDialog
+            people={people}
+            selectedIds={selectedParticipantIds}
+            hostUserId={activeRoom.host_user_id}
+            busy={busy}
+            onToggle={toggleParticipantSelection}
+            onClose={() => {
+              setAddMembersOpen(false);
+              setSelectedParticipantIds([]);
+            }}
+            onSubmit={manageParticipants}
+          />
         )}
 
         <div className="oc-meeting-participants">
@@ -1330,6 +1295,49 @@ function MeetingControlPanel({
         </>
       )}
     </div>
+  );
+}
+
+function MeetingAddParticipantsDialog({ people, selectedIds, hostUserId, busy, onToggle, onClose, onSubmit }) {
+  return (
+    <Scrim close={onClose}>
+      <h3 className="dialog-title">Quản lý người tham gia</h3>
+      <div className="oc-meeting-add-list">
+        {people.length === 0 ? (
+          <div className="oc-meeting-empty">Chưa có thành viên nào trong org group.</div>
+        ) : people.map((person) => {
+          const selected = selectedIds.includes(person.user_id);
+          const isHost = person.user_id === hostUserId;
+          return (
+            <button
+              key={person.user_id}
+              type="button"
+              className={`oc-meeting-add-row ${selected ? 'is-selected' : ''} ${isHost ? 'is-locked' : ''}`}
+              disabled={isHost}
+              onClick={() => onToggle(person.user_id)}
+            >
+              <span className="oc-meeting-add-check">{selected ? '✓' : ''}</span>
+              <span className="oc-meeting-add-person">
+                <strong>{personLabel(person)}</strong>
+                <small>{isHost ? 'Host' : person.email || 'Thành viên'}</small>
+              </span>
+            </button>
+          );
+        })}
+      </div>
+      <div className="form-actions">
+        <button className="mushy-btn mushy-btn--ghost" onClick={onClose} disabled={busy}>
+          Huỷ
+        </button>
+        <button
+          className="mushy-btn mushy-btn--primary"
+          onClick={onSubmit}
+          disabled={busy}
+        >
+          Lưu danh sách
+        </button>
+      </div>
+    </Scrim>
   );
 }
 
