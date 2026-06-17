@@ -974,14 +974,28 @@ function MeetingControlPanel({
     if (!activeRoom) setDetailOpen(false);
   }, [activeRoom]);
 
-  const run = async (fn, success) => {
+  const peopleHaveStatus = (rows, userIds, expectedStatus) => {
+    const nextStatusByUser = new Map(
+      (rows || []).map((person) => [person.user_id, person.status || 'available']),
+    );
+    return userIds.length > 0 && userIds.every((userId) => nextStatusByUser.get(userId) === expectedStatus);
+  };
+
+  const run = async (fn, success, verify) => {
     if (busy) return null;
     setBusy(true);
     try {
       const result = await fn();
       await loadRooms(result?.id || roomId);
       await loadParticipants();
-      await reloadPeople();
+      const latestPeople = await reloadPeople();
+      if (verify && !verify(latestPeople || [])) {
+        dialog.error(
+          'Status chưa đổi',
+          'Lệnh đã chạy nhưng dữ liệu đọc lại vẫn chưa chuyển sang In Meeting. Kiểm tra migration 013 trên Admin Portal đã được apply đúng bản mới nhất.',
+        );
+        return result;
+      }
       if (success) dialog.success('Đã cập nhật', success);
       return result;
     } catch (e) {
@@ -1018,23 +1032,31 @@ function MeetingControlPanel({
 
   const applyAll = async () => {
     if (!roomId || activeRoom?.status !== 'active') return;
+    const targetIds = activeParticipants.map((p) => p.user_id);
+    if (targetIds.length === 0) {
+      dialog.error('Chưa có người tham gia', 'Thêm thành viên vào phòng trước khi áp dụng trạng thái họp.');
+      return;
+    }
     await run(
       () => api.applyMeetingMode(roomId, null, activeRoom.planned_end_at || resolveMeetingUntil(duration, customUntil)),
       'Đã áp dụng In Meeting cho mọi người trong phòng.',
+      (latestPeople) => peopleHaveStatus(latestPeople, targetIds, 'in_meeting'),
     );
   };
 
   const setOne = async () => {
     if (!roomId || !targetUserId) return;
+    const selectedUserId = targetUserId;
     await run(
       () => api.setStatusForMember(
         roomId,
-        targetUserId,
+        selectedUserId,
         'in_meeting',
         activeRoom?.title || 'In meeting',
         activeRoom?.planned_end_at || resolveMeetingUntil(duration, customUntil),
       ),
       'Đã set In Meeting cho thành viên.',
+      (latestPeople) => peopleHaveStatus(latestPeople, [selectedUserId], 'in_meeting'),
     );
     setTargetUserId('');
   };
@@ -1087,7 +1109,7 @@ function MeetingControlPanel({
           </button>
           <button
             className="mushy-btn mushy-btn--ghost"
-            disabled={busy || !canManage || activeRoom.status !== 'active'}
+            disabled={busy || !canManage || activeRoom.status !== 'active' || activeParticipants.length === 0}
             onClick={applyAll}
           >
             Áp dụng tất cả
