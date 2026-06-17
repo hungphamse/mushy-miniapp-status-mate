@@ -32,6 +32,7 @@ export async function listMeetingRooms(groupId) {
     .from('meeting_rooms')
     .select('*')
     .eq('org_group_id', groupId)
+    .neq('status', 'ended')
     .order('created_at', { ascending: false });
   if (error) throw error;
   return data || [];
