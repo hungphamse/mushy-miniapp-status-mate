@@ -68,6 +68,13 @@ const STATUS_DURATION_OPTIONS = [
 
 const MEETING_DURATION_OPTIONS = STATUS_DURATION_OPTIONS.filter((o) => o.value !== 'none');
 
+const MEETING_STATUS_LABELS = {
+  scheduled: 'Đã lên lịch',
+  active: 'Đang họp',
+  ended: 'Đã kết thúc',
+  empty: 'Chưa có phòng',
+};
+
 // Reason → human-readable label (Team View + PersonActions)
 const REASON_LABELS = {
   manual_focus: 'Deep work',
@@ -904,6 +911,7 @@ function MeetingControlPanel({
   const [customUntil, setCustomUntil] = useState('');
   const [participantUserId, setParticipantUserId] = useState('');
   const [targetUserId, setTargetUserId] = useState('');
+  const [detailOpen, setDetailOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [backendReady, setBackendReady] = useState(true);
 
@@ -923,6 +931,7 @@ function MeetingControlPanel({
       setRooms([]);
       setParticipants([]);
       setRoomId('');
+      setDetailOpen(false);
     }
   }, [activeGroupId]);
 
@@ -952,15 +961,21 @@ function MeetingControlPanel({
   const availablePeople = people.filter((p) => !participantIds.has(p.user_id));
   const roomOptions = rooms.map((r) => ({
     value: r.id,
-    label: `${r.title || 'Meeting'} · ${r.status}`,
+    label: `${r.title || 'Meeting'} · ${MEETING_STATUS_LABELS[r.status] || r.status}`,
   }));
   const activeUntilMs = activeRoom?.planned_end_at
     ? new Date(activeRoom.planned_end_at).getTime()
     : null;
   const roomRemaining = formatRemaining(activeUntilMs, nowTick);
+  const roomTitle = activeRoom?.title || 'Meeting';
+  const roomStateLabel = MEETING_STATUS_LABELS[activeRoom?.status || 'empty'] || activeRoom?.status || 'empty';
+
+  useEffect(() => {
+    if (!activeRoom) setDetailOpen(false);
+  }, [activeRoom]);
 
   const run = async (fn, success) => {
-    if (busy) return;
+    if (busy) return null;
     setBusy(true);
     try {
       const result = await fn();
@@ -970,7 +985,7 @@ function MeetingControlPanel({
       if (success) dialog.success('Đã cập nhật', success);
       return result;
     } catch (e) {
-      dialog.error('Meeting Mode lỗi', e?.message || String(e));
+      dialog.error('Chế độ họp lỗi', e?.message || String(e));
       return null;
     } finally {
       setBusy(false);
@@ -980,14 +995,15 @@ function MeetingControlPanel({
   const createRoom = async () => {
     const until = resolveMeetingUntil(duration, customUntil);
     if (!until) {
-      dialog.error('Thiếu thời điểm kết thúc', 'Chọn thời lượng hợp lệ cho meeting.');
+      dialog.error('Thiếu thời điểm kết thúc', 'Chọn thời lượng hợp lệ cho phòng họp.');
       return;
     }
     const created = await run(
       () => api.createMeetingRoom(activeGroupId, title.trim() || 'Meeting', until, []),
-      'Đã tạo meeting room.',
+      'Đã tạo phòng họp.',
     );
     if (created?.id) setRoomId(created.id);
+    setDetailOpen(false);
     setTitle('');
   };
 
@@ -995,7 +1011,7 @@ function MeetingControlPanel({
     if (!roomId || !participantUserId) return;
     await run(
       () => api.addMeetingParticipants(roomId, [participantUserId]),
-      'Đã thêm participant.',
+      'Đã thêm người tham gia.',
     );
     setParticipantUserId('');
   };
@@ -1004,7 +1020,7 @@ function MeetingControlPanel({
     if (!roomId || activeRoom?.status !== 'active') return;
     await run(
       () => api.applyMeetingMode(roomId, null, activeRoom.planned_end_at || resolveMeetingUntil(duration, customUntil)),
-      'Đã set In Meeting cho participants.',
+      'Đã áp dụng In Meeting cho mọi người trong phòng.',
     );
   };
 
@@ -1018,7 +1034,7 @@ function MeetingControlPanel({
         activeRoom?.title || 'In meeting',
         activeRoom?.planned_end_at || resolveMeetingUntil(duration, customUntil),
       ),
-      'Đã set In Meeting cho member.',
+      'Đã set In Meeting cho thành viên.',
     );
     setTargetUserId('');
   };
@@ -1027,7 +1043,7 @@ function MeetingControlPanel({
     if (!roomId || !targetUserId) return;
     await run(
       () => api.restoreMeetingStatusForRoom(roomId, [targetUserId]),
-      'Đã restore trạng thái của member.',
+      'Đã khôi phục trạng thái của thành viên.',
     );
     setTargetUserId('');
   };
@@ -1035,29 +1051,124 @@ function MeetingControlPanel({
   const endRoom = async () => {
     if (!roomId) return;
     const ok = await dialog.confirm(
-      'Kết thúc meeting?',
-      'Trạng thái host-set sẽ được restore về trạng thái trước meeting.',
+      'Kết thúc phòng họp?',
+      'Trạng thái do host set sẽ được khôi phục về trạng thái trước cuộc họp.',
       { confirmLabel: 'Kết thúc', cancelLabel: 'Huỷ' },
     );
     if (!ok) return;
-    await run(() => api.endMeetingRoom(roomId, true), 'Đã kết thúc meeting.');
+    await run(() => api.endMeetingRoom(roomId, true), 'Đã kết thúc phòng họp.');
   };
+
+  if (detailOpen && activeRoom) {
+    return (
+      <div className="oc-meeting-panel oc-meeting-panel--detail">
+        <div className="oc-meeting-detail-head">
+          <button className="oc-back-btn" onClick={() => setDetailOpen(false)}>
+            ← Phòng
+          </button>
+          <div className="oc-meeting-detail-title">
+            <div className="oc-status-title">{roomTitle}</div>
+            <div className="oc-meeting-sub">
+              {activeParticipants.length} người tham gia{roomRemaining ? ` · ${roomRemaining}` : ''}
+            </div>
+          </div>
+          <span className={`oc-meeting-state oc-meeting-state--${activeRoom.status}`}>
+            {roomStateLabel}
+          </span>
+        </div>
+
+        <div className="oc-meeting-actions">
+          <button
+            className="mushy-btn mushy-btn--ghost"
+            disabled={busy || !canManage || activeRoom.status !== 'scheduled'}
+            onClick={() => run(() => api.startMeetingRoom(roomId), 'Phòng họp đã bắt đầu.')}
+          >
+            Bắt đầu
+          </button>
+          <button
+            className="mushy-btn mushy-btn--ghost"
+            disabled={busy || !canManage || activeRoom.status !== 'active'}
+            onClick={applyAll}
+          >
+            Áp dụng tất cả
+          </button>
+          <button
+            className="mushy-btn mushy-btn--ghost"
+            disabled={busy || !canManage || activeRoom.status === 'ended'}
+            onClick={endRoom}
+          >
+            Kết thúc & khôi phục
+          </button>
+        </div>
+
+        {canManage && (
+          <div className="oc-meeting-tools">
+            <div className="oc-meeting-tool">
+              <MemberSearchSelect
+                value={participantUserId}
+                onChange={setParticipantUserId}
+                people={availablePeople}
+                placeholder="Thêm người tham gia"
+              />
+              <button className="oc-mini-btn" disabled={busy || !participantUserId} onClick={addParticipant}>
+                +
+              </button>
+            </div>
+            <div className="oc-meeting-tool">
+              <MemberSearchSelect
+                value={targetUserId}
+                onChange={setTargetUserId}
+                people={people}
+                placeholder="Set/khôi phục thành viên"
+              />
+              <button className="oc-mini-btn" disabled={busy || !targetUserId} onClick={setOne}>
+                Set họp
+              </button>
+              <button className="oc-mini-btn" disabled={busy || !targetUserId} onClick={restoreOne}>
+                Khôi phục
+              </button>
+            </div>
+          </div>
+        )}
+
+        <div className="oc-meeting-participants">
+          {activeParticipants.length === 0 ? (
+            <div className="oc-meeting-empty">Chưa có người tham gia.</div>
+          ) : activeParticipants.map((p) => {
+            const person = people.find((x) => x.user_id === p.user_id);
+            const info = statusByUser[p.user_id] || { status: 'available', untilMs: null, source: 'self' };
+            const meta = getStatusMeta(info.status);
+            const remain = formatRemaining(info.untilMs, nowTick);
+            return (
+              <div key={p.user_id} className="oc-meeting-participant">
+                <div className="oc-meeting-person">
+                  <span>{personLabel(person)}</span>
+                  <small>{p.role === 'host' ? 'Host' : p.role === 'co_host' ? 'Co-host' : 'Thành viên'}</small>
+                </div>
+                <span className={`oc-status-pill oc-status-pill--${info.status}`}>
+                  <span className="oc-status-dot" />{meta.label}
+                </span>
+                {info.source === 'host' && <span className="oc-host-badge">Host set</span>}
+                {remain && <span className="oc-status-remaining">{remain}</span>}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="oc-meeting-panel">
       <div className="oc-meeting-head">
         <div>
-          <div className="oc-status-title">Meeting Mode</div>
-          {activeRoom ? (
-            <div className="oc-meeting-sub">
-              {activeRoom.title || 'Meeting'}{roomRemaining ? ` · ${roomRemaining}` : ''}
-            </div>
-          ) : (
-            <div className="oc-meeting-sub">Chưa có meeting room</div>
-          )}
+          <div className="oc-status-title">Chế độ họp</div>
+          <div className="oc-meeting-sub">
+            {activeRoom ? `${roomTitle} · ${roomStateLabel}` : 'Tạo hoặc mở nhanh phòng họp'}
+          </div>
         </div>
         <span className={`oc-meeting-state oc-meeting-state--${activeRoom?.status || 'empty'}`}>
-          {activeRoom?.status || 'empty'}
+          {roomStateLabel}
         </span>
       </div>
 
@@ -1071,7 +1182,7 @@ function MeetingControlPanel({
               value={title}
               maxLength={100}
               onChange={(e) => setTitle(e.target.value)}
-              placeholder="Tên meeting"
+              placeholder="Tên phòng họp"
             />
             <Select
               value={duration}
@@ -1100,96 +1211,27 @@ function MeetingControlPanel({
               />
             )}
             <button className="mushy-btn mushy-btn--primary" disabled={busy} onClick={createRoom}>
-              Tạo room
+              Tạo phòng
             </button>
           </div>
 
           {rooms.length > 0 && (
-            <div className="oc-meeting-room-select">
-              <Select value={roomId} onChange={setRoomId} options={roomOptions} placeholder="Chọn meeting room" />
-            </div>
-          )}
-
-          {activeRoom && (
-            <>
-              <div className="oc-meeting-actions">
-                <button
-                  className="mushy-btn mushy-btn--ghost"
-                  disabled={busy || !canManage || activeRoom.status !== 'scheduled'}
-                  onClick={() => run(() => api.startMeetingRoom(roomId), 'Meeting đã bắt đầu.')}
-                >
-                  Start
-                </button>
-                <button
-                  className="mushy-btn mushy-btn--ghost"
-                  disabled={busy || !canManage || activeRoom.status !== 'active'}
-                  onClick={applyAll}
-                >
-                  Set all
-                </button>
-                <button
-                  className="mushy-btn mushy-btn--ghost"
-                  disabled={busy || !canManage || activeRoom.status === 'ended'}
-                  onClick={endRoom}
-                >
-                  End & restore
-                </button>
-              </div>
-
-              {canManage && (
-                <div className="oc-meeting-tools">
-                  <div className="oc-meeting-tool">
-                    <MemberSearchSelect
-                      value={participantUserId}
-                      onChange={setParticipantUserId}
-                      people={availablePeople}
-                      placeholder="Thêm participant"
-                    />
-                    <button className="oc-mini-btn" disabled={busy || !participantUserId} onClick={addParticipant}>
-                      +
-                    </button>
+            <div className="oc-meeting-check">
+              <Select value={roomId} onChange={setRoomId} options={roomOptions} placeholder="Chọn phòng họp" />
+              {activeRoom && (
+                <div className="oc-meeting-summary">
+                  <div className="oc-meeting-summary-main">
+                    <strong>{roomTitle}</strong>
+                    <span>
+                      {roomStateLabel}{roomRemaining ? ` · ${roomRemaining}` : ''} · {activeParticipants.length} người
+                    </span>
                   </div>
-                  <div className="oc-meeting-tool">
-                    <MemberSearchSelect
-                      value={targetUserId}
-                      onChange={setTargetUserId}
-                      people={people}
-                      placeholder="Host set / restore"
-                    />
-                    <button className="oc-mini-btn" disabled={busy || !targetUserId} onClick={setOne}>
-                      Set
-                    </button>
-                    <button className="oc-mini-btn" disabled={busy || !targetUserId} onClick={restoreOne}>
-                      Restore
-                    </button>
-                  </div>
+                  <button className="mushy-btn mushy-btn--ghost" onClick={() => setDetailOpen(true)}>
+                    Chi tiết
+                  </button>
                 </div>
               )}
-
-              <div className="oc-meeting-participants">
-                {activeParticipants.length === 0 ? (
-                  <div className="oc-meeting-empty">Chưa có participant.</div>
-                ) : activeParticipants.map((p) => {
-                  const person = people.find((x) => x.user_id === p.user_id);
-                  const info = statusByUser[p.user_id] || { status: 'available', untilMs: null, source: 'self' };
-                  const meta = getStatusMeta(info.status);
-                  const remain = formatRemaining(info.untilMs, nowTick);
-                  return (
-                    <div key={p.user_id} className="oc-meeting-participant">
-                      <div className="oc-meeting-person">
-                        <span>{personLabel(person)}</span>
-                        <small>{p.role}</small>
-                      </div>
-                      <span className={`oc-status-pill oc-status-pill--${info.status}`}>
-                        <span className="oc-status-dot" />{meta.label}
-                      </span>
-                      {info.source === 'host' && <span className="oc-host-badge">Host set</span>}
-                      {remain && <span className="oc-status-remaining">{remain}</span>}
-                    </div>
-                  );
-                })}
-              </div>
-            </>
+            </div>
           )}
         </>
       )}
