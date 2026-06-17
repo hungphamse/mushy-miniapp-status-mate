@@ -463,12 +463,14 @@ export default function App() {
       return;
     }
     let until = null;
-    if (myStatusDuration === 'custom') {
-      until = fromLocalInputValue(myStatusUntil);
-    } else if (myStatusDuration !== 'none') {
-      const min = parseInt(myStatusDuration, 10);
-      if (Number.isFinite(min) && min > 0) {
-        until = new Date(Date.now() + min * 60000).toISOString();
+    if (myStatus !== 'available') {
+      if (myStatusDuration === 'custom') {
+        until = fromLocalInputValue(myStatusUntil);
+      } else if (myStatusDuration !== 'none') {
+        const min = parseInt(myStatusDuration, 10);
+        if (Number.isFinite(min) && min > 0) {
+          until = new Date(Date.now() + min * 60000).toISOString();
+        }
       }
     }
     const reason = myStatus === 'available' ? null : (myStatusReason || null);
@@ -618,6 +620,10 @@ export default function App() {
               const defaultReason = opts?.[0]?.value ?? null;
               setMyStatusReason(defaultReason);
               if (defaultReason !== 'custom') setMyStatusCustomText('');
+              if (value === 'available') {
+                setMyStatusDuration('none');
+                setMyStatusUntil('');
+              }
             }}
             onMsgChange={(value) => { setMyStatusDirty(true); setMyStatusMsg(value); }}
             onReasonChange={(value) => {
@@ -806,6 +812,7 @@ function MyStatusCard({
   const meta = getStatusMeta(currentStatus);
   const canEdit = !lockedByMeeting;
   const showSourceBadge = currentSource === 'host' && currentStatus !== 'in_meeting';
+  const canSetDuration = editStatus !== 'available';
   return (
     <div className="oc-status-card">
       <div className="oc-status-card-head">
@@ -885,28 +892,32 @@ function MyStatusCard({
             placeholder="VD: Đang deep work, ping nếu urgent"
           />
 
-          <label className="oc-label">Thời lượng</label>
-          <div className="oc-duration-row">
-            <Select
-              value={editDuration}
-              onChange={onDurationChange}
-              options={STATUS_DURATION_OPTIONS}
-              placeholder="Chọn thời lượng"
-            />
-            {editDuration === 'custom' && (
-              <DatePicker
-                selected={toDateFromLocalInput(editUntil)}
-                onChange={(date) => onUntilChange(date ? toLocalInputValue(date.toISOString()) : '')}
-                showTimeSelect
-                timeIntervals={15}
-                dateFormat="Pp"
-                timeCaption="Giờ"
-                locale="vi"
-                placeholderText="Chọn thời điểm kết thúc"
-                className="mushy-input oc-datepicker"
-              />
-            )}
-          </div>
+          {canSetDuration && (
+            <>
+              <label className="oc-label">Thời lượng</label>
+              <div className="oc-duration-row">
+                <Select
+                  value={editDuration}
+                  onChange={onDurationChange}
+                  options={STATUS_DURATION_OPTIONS}
+                  placeholder="Chọn thời lượng"
+                />
+                {editDuration === 'custom' && (
+                  <DatePicker
+                    selected={toDateFromLocalInput(editUntil)}
+                    onChange={(date) => onUntilChange(date ? toLocalInputValue(date.toISOString()) : '')}
+                    showTimeSelect
+                    timeIntervals={15}
+                    dateFormat="Pp"
+                    timeCaption="Giờ"
+                    locale="vi"
+                    placeholderText="Chọn thời điểm kết thúc"
+                    className="mushy-input oc-datepicker"
+                  />
+                )}
+              </div>
+            </>
+          )}
 
           <div className="oc-status-actions">
             <button className="mushy-btn mushy-btn--primary" onClick={onSave} disabled={busy}>
