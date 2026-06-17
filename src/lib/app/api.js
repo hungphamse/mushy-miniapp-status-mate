@@ -111,14 +111,6 @@ export const api = {
       p_user_ids: p_user_ids || null,
       p_until: p_until || null,
     }),
-  setStatusForMember: (p_room_id, p_user_id, p_status, p_message, p_until) =>
-    call('set_status_for_member', {
-      p_room_id,
-      p_user_id,
-      p_status: p_status || 'in_meeting',
-      p_message: p_message || null,
-      p_until: p_until || null,
-    }),
   restoreMeetingStatusForRoom: (p_room_id, p_user_ids = null) =>
     call('restore_meeting_status_for_room', { p_room_id, p_user_ids }),
   endMeetingRoom: (p_room_id, p_restore = true) =>
