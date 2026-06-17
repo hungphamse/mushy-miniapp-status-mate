@@ -537,7 +537,7 @@ where org_group_id=p_group_id
 and user_id=auth.uid();
 v_ws :=app_status_mate._group_origin_ws(p_group_id);
 v_until :=p_until;
-if v_until is not null and v_until <=now() then
+if p_status='available' or (v_until is not null and v_until <=now()) then
 v_until :=null;
 end if;
 v_reason :=p_reason;
