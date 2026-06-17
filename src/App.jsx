@@ -994,6 +994,14 @@ function MeetingControlPanel({
   const activeRoom = rooms.find((r) => r.id === roomId) || null;
   const activeParticipants = participants.filter((p) => !p.left_at);
   const participantIds = new Set(activeParticipants.map((p) => p.user_id));
+  const roomParticipantPeople = activeParticipants.map((participant) => {
+    const person = people.find((p) => p.user_id === participant.user_id);
+    return person || {
+      user_id: participant.user_id,
+      full_name: participant.user_id,
+      email: '',
+    };
+  });
   const meParticipant = activeParticipants.find((p) => p.user_id === ctx?.userId);
   const canManage = !!activeRoom && (
     isAdmin || activeRoom.host_user_id === ctx?.userId || meParticipant?.role === 'co_host'
@@ -1013,6 +1021,11 @@ function MeetingControlPanel({
   useEffect(() => {
     if (!activeRoom) setDetailOpen(false);
   }, [activeRoom]);
+  useEffect(() => {
+    if (targetUserId && !activeParticipants.some((p) => p.user_id === targetUserId)) {
+      setTargetUserId('');
+    }
+  }, [activeParticipants, targetUserId]);
 
   const peopleHaveStatus = (rows, userIds, expectedStatus) => {
     const nextStatusByUser = new Map(
@@ -1095,7 +1108,7 @@ function MeetingControlPanel({
   };
 
   const setOne = async () => {
-    if (!roomId || !targetUserId) return;
+    if (!roomId || !targetUserId || activeRoom?.status !== 'active') return;
     const selectedUserId = targetUserId;
     const until = resolveMeetingStatusUntil();
     await run(
@@ -1113,7 +1126,7 @@ function MeetingControlPanel({
   };
 
   const restoreOne = async () => {
-    if (!roomId || !targetUserId) return;
+    if (!roomId || !targetUserId || activeRoom?.status !== 'active') return;
     await run(
       () => api.restoreMeetingStatusForRoom(roomId, [targetUserId]),
       'Đã khôi phục trạng thái của thành viên.',
@@ -1191,13 +1204,21 @@ function MeetingControlPanel({
               <MemberSearchSelect
                 value={targetUserId}
                 onChange={setTargetUserId}
-                people={people}
+                people={roomParticipantPeople}
                 placeholder="Set/khôi phục thành viên"
               />
-              <button className="oc-mini-btn" disabled={busy || !targetUserId} onClick={setOne}>
+              <button
+                className="oc-mini-btn"
+                disabled={busy || !targetUserId || activeRoom.status !== 'active'}
+                onClick={setOne}
+              >
                 Set họp
               </button>
-              <button className="oc-mini-btn" disabled={busy || !targetUserId} onClick={restoreOne}>
+              <button
+                className="oc-mini-btn"
+                disabled={busy || !targetUserId || activeRoom.status !== 'active'}
+                onClick={restoreOne}
+              >
                 Khôi phục
               </button>
             </div>
